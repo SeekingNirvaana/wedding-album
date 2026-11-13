@@ -21,7 +21,7 @@
     "FACE_INSTANCES": "3"
   },
   "d1_databases": [
-    { "binding": "DB", "database_name": "wedding-album", "database_id": "PASTE_D1_DATABASE_ID_HERE", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "wedding-album", "database_id": "147fc05d-6835-4ea0-b174-cfff471ee1ea", "migrations_dir": "migrations" }
   ],
   "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "wedding-album" }],
   "queues": {
