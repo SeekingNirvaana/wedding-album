@@ -15,7 +15,7 @@
   "vars": {
     "ENVIRONMENT": "production",
     "OTP_PROVIDER": "messagecentral",
-    "TURNSTILE_SITE_KEY": "",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAF_kbl1ZY8glVk1_",
     "FIREBASE_PROJECT_ID": "",
     "FIREBASE_API_KEY": "",
     "FACE_INSTANCES": "3"
