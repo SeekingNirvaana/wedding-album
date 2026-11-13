@@ -1,6 +1,7 @@
 // Live selfie with randomized head-turn prompts. Frames are captured unmirrored (the preview is mirrored
 // so it feels like a mirror). All checking happens on the server.
-import { h } from './core.js';
+import { h, sound, haptic } from './core.js';
+import { petalRing } from './fx.js';
 import { fill } from './core.js';
 import { t } from './i18n.js';
 
@@ -47,10 +48,12 @@ export async function liveCapture(mount, sequence) {
   const video = h('video', { class: 'cam-video', playsinline: true, muted: true, autoplay: true });
   video.srcObject = stream;
   const prompt = h('p', { class: 'cam-prompt', 'aria-live': 'assertive' }, t('look_straight'));
-  const arrow = h('div', { class: 'cam-arrow', 'aria-hidden': 'true' });
+  const arrow = h('div', { class: 'cam-arrow', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
   const ring = h('div', { class: 'cam-ring' });
-  const dots = h('div', { class: 'cam-dots' }, sequence.map(() => h('i')));
-  const stage = h('div', { class: 'cam-stage' }, video, h('div', { class: 'cam-oval' }), ring, arrow);
+  const petals = petalRing(28);
+  const icons = { center: '◉', left: '←', right: '→' };
+  const dots = h('div', { class: 'cam-steps' }, sequence.map((st) => h('i', { 'data-dir': st }, icons[st] || '•')));
+  const stage = h('div', { class: 'cam-stage' }, video, h('div', { class: 'cam-oval' }), ring, petals, arrow, h('div', { class: 'cam-flash' }));
   fill(mount, stage, prompt, dots);
 
   try {
@@ -64,6 +67,8 @@ export async function liveCapture(mount, sequence) {
     for (let i = 0; i < sequence.length; i++) {
       const step = sequence[i];
       prompt.textContent = step === 'left' ? t('turn_left') : step === 'right' ? t('turn_right') : t('look_straight');
+      prompt.classList.remove('swap'); void prompt.offsetWidth; prompt.classList.add('swap');
+      [...dots.children].forEach((d, k) => d.classList.toggle('cur', k === i));
       // The preview is mirrored, so "your left" appears on the left of the screen
       arrow.className = 'cam-arrow ' + (step === 'center' ? '' : step === 'left' ? 'go-left' : 'go-right');
       ring.style.animation = 'none'; void ring.offsetWidth; ring.style.animation = '';
@@ -71,7 +76,9 @@ export async function liveCapture(mount, sequence) {
       await wait(step === 'center' ? 1500 : 2300);
       frames.push(toB64(grab(video)));
       dots.children[i].classList.add('done');
-      if (navigator.vibrate) navigator.vibrate(15);
+      petals.setProgress((i + 1) / sequence.length);
+      stage.querySelector('.cam-flash').animate([{ opacity: 0.55 }, { opacity: 0 }], { duration: 320 });
+      sound.play('tap'); haptic(15);
     }
     prompt.textContent = t('checking');
     arrow.className = 'cam-arrow';

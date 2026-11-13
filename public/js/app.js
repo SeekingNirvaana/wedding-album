@@ -1,4 +1,5 @@
-import { api, ApiError, h, toast, sheet, petals, sound, device, net, cropUrl, fmtCount } from './core.js';
+import { api, ApiError, h, toast, sheet, petals, sound, device, net, cropUrl, fmtCount, haptic } from './core.js';
+import { toran, mandala, templeDoors, floatingDiyas, embers, letters, burst, ripple, petalRing } from './fx.js';
 import { fill } from './core.js';
 import { t, getLang, setLang } from './i18n.js';
 import { createGallery } from './gallery.js';
@@ -35,26 +36,36 @@ async function refreshMe() {
 }
 
 // ---------------- gate & sign-in ----------------
-function garland() { return h('div', { class: 'garland', 'aria-hidden': 'true' }); }
+function garland() { return toran(device.lite ? 10 : 18); }
 
 function renderGate() {
   const c = state.config;
-  const diyas = device.lite ? [] : Array.from({ length: 7 }, (_, i) => h('i', { class: 'diya', style: { left: 8 + i * 13 + '%', animationDelay: i * 1.3 + 's' } }));
-  fill(app, h('main', { class: 'gate' },
-    garland(),
+  let seen = false; try { seen = sessionStorage.getItem('wa_doors') === '1'; sessionStorage.setItem('wa_doors', '1'); } catch { /* */ }
+  const doors = seen ? null : templeDoors();
+  const d0 = seen ? 0 : 1.1; // text starts once the doors are half open
+  const enter = h('button', { class: 'btn primary glow shine', onclick: (e) => { ripple(e); haptic(15); sound.play('welcome'); openSignIn(); } }, t('enter'));
+  fill(app, h('main', { class: 'gate' + (seen ? ' seen' : '') },
     h('div', { class: 'gate-art', 'aria-hidden': 'true' }),
-    ...diyas,
+    h('div', { class: 'gate-sky', 'aria-hidden': 'true' }, h('i', { class: 'moon' }), ...Array.from({ length: device.lite ? 0 : 18 }, (_, i) => h('b', { class: 'star', style: { left: `${(i * 53) % 100}%`, top: `${(i * 29) % 38}%`, animationDelay: `${(i * 0.7) % 5}s` } }))),
+    ...embers(), ...floatingDiyas(),
+    garland(),
     h('div', { class: 'gate-inner' },
-      h('p', { class: 'dev-line' }, '॥ शुभ विवाह ॥'),
-      h('p', { class: 'eyebrow' }, t('album')),
-      h('h1', { class: 'names' }, 'Anoop', h('span', { class: 'weds' }, 'weds'), 'Sanghmitra'),
-      h('p', { class: 'gate-sub' }, c.subtitle),
-      h('p', { class: 'gate-lede' }, t('gate_sub')),
-      h('button', { class: 'btn primary glow', onclick: openSignIn }, t('enter')),
-      h('button', { class: 'lang-switch', onclick: () => { setLang(getLang() === 'hi' ? 'en' : 'hi'); renderGate(); } }, getLang() === 'hi' ? 'English' : 'हिन्दी'),
+      device.lite ? null : mandala({ cls: 'mandala gate-mandala' }),
+      h('p', { class: 'dev-line rise', style: { animationDelay: d0 + 's' } }, '॥ शुभ विवाह ॥'),
+      h('p', { class: 'eyebrow rise', style: { animationDelay: d0 + 0.2 + 's' } }, t('album')),
+      h('h1', { class: 'names' },
+        h('span', { class: 'nm' }, ...letters('Anoop', d0 + 0.35)),
+        h('span', { class: 'weds rise', style: { animationDelay: d0 + 0.75 + 's' } }, 'weds'),
+        h('span', { class: 'nm' }, ...letters('Sanghmitra', d0 + 0.9, 0.05)),
+        h('i', { class: 'name-shine', 'aria-hidden': 'true', style: { animationDelay: d0 + 1.8 + 's' } })),
+      h('p', { class: 'gate-sub rise', style: { animationDelay: d0 + 1.5 + 's' } }, c.subtitle),
+      h('p', { class: 'gate-lede rise', style: { animationDelay: d0 + 1.7 + 's' } }, t('gate_sub')),
+      h('div', { class: 'rise', style: { animationDelay: d0 + 1.95 + 's' } }, enter),
+      h('button', { class: 'lang-switch rise', style: { animationDelay: d0 + 2.1 + 's' }, onclick: () => { setLang(getLang() === 'hi' ? 'en' : 'hi'); renderGate(); } }, getLang() === 'hi' ? 'English' : 'हिन्दी'),
     ),
+    doors,
   ));
-  sound.play('welcome');
+  sound.preload();
 }
 
 let turnstileLoaded = null;
@@ -72,7 +83,8 @@ function openSignIn() {
   const phone = h('input', { class: 'field', type: 'tel', inputmode: 'numeric', autocomplete: 'tel-national', maxlength: 14, placeholder: '98765 43210' });
   const sideCard = (key, art) => h('button', { type: 'button', class: 'side-card' + (side === key ? ' on' : ''), 'data-side': key, onclick: (e) => {
     side = key; e.currentTarget.parentElement.querySelectorAll('.side-card').forEach((b) => b.classList.toggle('on', b.dataset.side === key));
-  } }, h('span', { class: 'side-art', style: { backgroundImage: `url(${art})` } }), h('b', {}, t(key + '_side')), h('small', {}, c.sides[key].place));
+    sound.play('tap'); haptic(8);
+  } }, h('span', { class: 'side-art', style: { backgroundImage: `url(${art})` } }), h('i', { class: 'side-tick', 'aria-hidden': 'true' }), h('b', {}, t(key + '_side')), h('small', {}, c.sides[key].place));
   const consent = h('input', { type: 'checkbox', id: 'consent' });
   const ts = h('div', { class: 'ts-box' });
   const err = h('p', { class: 'err', role: 'alert' });
@@ -104,7 +116,8 @@ function openSignIn() {
     h('p', { class: 'label' }, t('i_am_with')),
     h('div', { class: 'side-row' }, sideCard('groom', '/art/hero-kashi.webp'), sideCard('bride', '/art/sangam-dawn.webp')),
     h('label', { class: 'check' }, consent, h('span', {}, t('consent'))),
-    ts, err, send);
+    ts, err, send, h('p', { class: 'sms-note' }, t('sms_from')));
+  send.addEventListener('pointerdown', ripple);
   const s = sheet(form);
   setTimeout(() => name.focus(), 350);
   if (c.turnstileSiteKey) {
@@ -133,7 +146,9 @@ function otpStep(s, res, phoneVal, nameVal, side) {
     e.preventDefault(); err.textContent = ''; btn.disabled = true;
     try {
       await api('/api/auth/verify', { method: 'POST', body: { requestId: res.requestId, code: code.value, name: nameVal, side, consent: true } });
-      clearInterval(tick); s.close(); await refreshMe();
+      clearInterval(tick); haptic([10, 40, 10]); sound.play('bell');
+      const r = btn.getBoundingClientRect(); burst({ x: r.left + r.width / 2, y: r.top, n: 20 });
+      setTimeout(async () => { s.close(); await refreshMe(); }, 650);
     } catch (e2) {
       err.textContent = e2.message; btn.disabled = false;
       if (e2.data?.code === 'expired') { resend.disabled = false; resend.textContent = t('resend'); }
@@ -141,10 +156,17 @@ function otpStep(s, res, phoneVal, nameVal, side) {
   } },
     h('h2', {}, t('verify')),
     h('p', { class: 'muted' }, `${t('enter_code')} +91 ${phoneVal.replace(/\D/g, '').slice(-10)}`),
-    code, err, btn,
+    h('div', { class: 'otp-wrap' }, code, h('div', { class: 'otp-boxes', 'aria-hidden': 'true' }, ...Array.from({ length: 6 }, () => h('i')))), err, btn,
     h('div', { class: 'row-between' }, resend, h('button', { type: 'button', class: 'link-btn', onclick: () => { clearInterval(tick); s.close(); openSignIn(); } }, t('change_number'))));
   fill(s.panel, h('div', { class: 'grab' }), form);
-  code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 6); if (code.value.length === 6) form.requestSubmit(); });
+  const boxes = form.querySelectorAll('.otp-boxes i');
+  code.addEventListener('input', () => {
+    code.value = code.value.replace(/\D/g, '').slice(0, 6);
+    boxes.forEach((b, i) => { b.textContent = code.value[i] || ''; b.classList.toggle('on', i < code.value.length); b.classList.toggle('cur', i === code.value.length); });
+    if (code.value.length) haptic(5);
+    if (code.value.length === 6) form.requestSubmit();
+  });
+  code.addEventListener('focus', () => code.dispatchEvent(new Event('input')));
   setTimeout(() => code.focus(), 100);
 }
 
@@ -180,9 +202,10 @@ async function firebaseFlow(s, phoneVal, nameVal, side) {
 function renderFaceSetup(purpose = 'self', label = null, onDone = null) {
   const body = h('div', { class: 'face-body' });
   const intro = h('div', { class: 'face-intro' },
-    h('div', { class: 'face-illus', 'aria-hidden': 'true' }, h('i'), h('b')),
+    h('div', { class: 'face-illus', 'aria-hidden': 'true' }, mandala({ cls: 'mandala face-mandala', rings: [[12, 72, 20], [20, 94, 14]] }), h('i', { class: 'fi-face' }), h('b', { class: 'fi-scan' })),
     h('h2', {}, purpose === 'self' ? t('face_title') : t('add_family')),
-    h('p', {}, purpose === 'self' ? t('face_body') : t('family_body')),
+    purpose === 'self' ? null : h('p', {}, t('family_body')),
+    h('ol', { class: 'face-steps' }, h('li', {}, h('span', {}, '1'), t('step_look')), h('li', {}, h('span', {}, '2'), t('step_turn')), h('li', {}, h('span', {}, '3'), t('step_done'))),
     h('p', { class: 'muted small' }, t('face_private')));
   const startBtn = h('button', { class: 'btn primary wide glow', onclick: () => run(cameraSupported() ? 'live' : 'stills') }, t('start_camera'));
   const alt = h('button', { class: 'link-btn', onclick: () => run('stills') }, t('use_photos_instead'));
@@ -208,15 +231,25 @@ function renderFaceSetup(purpose = 'self', label = null, onDone = null) {
       } else fill(body, intro, startBtn, alt);
       return;
     }
-    stage.append(h('div', { class: 'spinner', 'aria-hidden': 'true' }));
+    const msg = h('p', { class: 'think-msg' }, t('think_1'));
+    fill(body, h('div', { class: 'thinking' }, h('div', { class: 'rangoli-load', 'aria-hidden': 'true' }, mandala({ cls: 'mandala spin-slow', rings: [[16, 90, 26], [10, 60, 22]] }), h('i')), msg));
+    let mi = 1; const cycle = setInterval(() => { msg.classList.remove('swap'); void msg.offsetWidth; msg.classList.add('swap'); msg.textContent = t('think_' + (1 + (mi++ % 3))); }, 2200);
     try {
       const res = await api('/api/enroll/submit', { method: 'POST', body: { challengeId: ch.challengeId, frames: cap.frames, mode: cap.mode } });
+      clearInterval(cycle);
       if (!res.ok) throw new ApiError(400, { error: t('reason_' + res.reason) });
-      sound.play('found'); petals();
-      fill(body, h('div', { class: 'face-done' }, h('div', { class: 'tick', 'aria-hidden': 'true' }), h('h2', {}, t('face_ok'))));
-      setTimeout(() => (onDone ? onDone() : refreshMe()), 1800);
+      sound.play('found'); haptic([20, 60, 20, 60, 40]); burst({ n: 36 }); setTimeout(() => petals(24), 300);
+      const who = purpose === 'self' ? (state.me?.user?.name || '') : label;
+      fill(body, h('div', { class: 'face-done' },
+        h('div', { class: 'bloom', 'aria-hidden': 'true' }, mandala({ cls: 'mandala bloom-m', rings: [[16, 92, 30], [12, 60, 24]] }), h('div', { class: 'tick' })),
+        h('h2', {}, purpose === 'self' ? `${t('welcome')}, ${who}` : `${who} ✓`),
+        h('p', { class: 'muted' }, t('face_ok'))));
+      setTimeout(() => (onDone ? onDone() : refreshMe()), 2600);
     } catch (e) {
-      fill(body, h('p', { class: 'err center' }, e.message), h('button', { class: 'btn primary wide', onclick: () => run(mode) }, t('try_again')));
+      clearInterval(cycle); haptic([40, 40, 40]);
+      fill(body, h('div', { class: 'face-fail' }, h('div', { class: 'fail-diya', 'aria-hidden': 'true' }, h('i', { class: 'flame' }), h('b', { class: 'bowl' })),
+        h('p', { class: 'err center' }, e.message), h('p', { class: 'muted small' }, t('retry_tips'))),
+        h('button', { class: 'btn primary wide', onclick: () => run(mode) }, t('try_again')));
     }
   }
 }
@@ -249,8 +282,9 @@ function renderShell() {
   content = h('section', { class: 'content' });
   banner = h('div', { class: 'net-banner', hidden: true });
   navEl = h('nav', { class: 'bottom-nav' }, TABS.map(([key, label, d]) => key === 'upload'
-    ? h('button', { class: 'shutter', 'aria-label': t('upload'), onclick: openUpload }, h('span'))
-    : h('button', { class: 'nav-btn', 'data-tab': key, onclick: () => switchTab(key) }, icon(d), h('small', {}, t(label)))));
+    ? h('button', { class: 'shutter', 'aria-label': t('upload'), onclick: (e) => { ripple(e); haptic(12); openUpload(); } }, h('span'), h('em', { class: 'halo', 'aria-hidden': 'true' }))
+    : h('button', { class: 'nav-btn', 'data-tab': key, onclick: () => { if (state.tab !== key) { sound.play('tap'); haptic(6); } switchTab(key); } }, icon(d), h('small', {}, t(label)))),
+    h('i', { class: 'nav-ink', 'aria-hidden': 'true' }));
   fill(app, h('header', { class: 'top' },
     h('div', {}, h('p', { class: 'dev-line small' }, '॥ शुभ विवाह ॥'), h('p', { class: 'top-names' }, 'Anoop & Sanghmitra')),
     h('button', { class: 'avatar', 'aria-label': t('profile'), onclick: () => switchTab('profile') }, (state.me.user.name || 'G').slice(0, 1).toUpperCase())),
@@ -268,12 +302,16 @@ function updateBanner() {
     else banner.hidden = true;
   });
 }
+window.addEventListener('resize', () => { if (navEl) switchInk(); });
+function switchInk() { const on = navEl.querySelector('.nav-btn.on'), ink = navEl.querySelector('.nav-ink'); if (on && ink) ink.style.transform = `translateX(${on.offsetLeft + on.offsetWidth / 2 - 14}px)`; }
 window.addEventListener('online', updateBanner); window.addEventListener('offline', updateBanner);
 net.on(updateBanner);
 
 function switchTab(key) {
   state.tab = key;
   navEl?.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('on', b.dataset.tab === key));
+  const on = navEl?.querySelector('.nav-btn.on'), ink = navEl?.querySelector('.nav-ink');
+  if (ink) { if (on) { ink.style.opacity = '1'; ink.style.transform = `translateX(${on.offsetLeft + on.offsetWidth / 2 - 14}px)`; } else ink.style.opacity = '0'; }
   content.classList.remove('enter'); void content.offsetWidth; content.classList.add('enter');
   if (key === 'you') renderYou();
   else if (key === 'highlights') renderListTab('highlights', t('highlights'));
@@ -320,7 +358,7 @@ async function renderYou() {
   const head = h('div', { class: 'hello' },
     h('p', { class: 'eyebrow' }, `${t('hi')}, ${me.user.name}`),
     h('h2', { class: 'big-title' }, t('found_you')),
-    h('p', { class: 'count-line' }, h('b', { class: 'count' }, '…')));
+    h('p', { class: 'count-line' }, h('b', { class: 'count' }, '…'), ' ', h('span', { class: 'count-word' }, t('photos_word'))));
   const people = h('div', { class: 'people' },
     h('button', { class: 'person on', 'data-scope': 'me', onclick: () => setScope('me') }, h('span', { class: 'p-dot' }, (me.user.name || 'Y')[0]), me.user.name),
     me.family.filter((f) => f.status === 'active').map((f) => h('button', { class: 'person', 'data-scope': 'group:' + f.id, onclick: () => setScope('group:' + f.id) }, h('span', { class: 'p-dot' }, (f.label || 'F')[0]), f.label)));
@@ -338,7 +376,11 @@ async function renderYou() {
     const total = counts.reduce((a, c) => a + c.n, 0);
     countUp(head.querySelector('.count'), total);
     let seen = 0; try { seen = Number(localStorage.getItem('wa_seen') || 0); } catch { /* */ }
-    if (total > seen && seen >= 0 && total > 0) { petals(14); sound.play('found'); }
+    if (total > 0) head.classList.add('has');
+    if (total > seen && seen >= 0 && total > 0) {
+      setTimeout(() => { const r = head.querySelector('.count').getBoundingClientRect(); burst({ x: r.left + r.width / 2, y: r.top + r.height / 2, n: 24 }); petals(16); sound.play('found'); haptic([15, 50, 15]); }, 700);
+      if (total - seen > 0 && seen > 0) head.querySelector('.count-line').append(h('span', { class: 'new-pill' }, `+${total - seen} ${t('new')}`));
+    }
     try { localStorage.setItem('wa_seen', String(total)); } catch { /* */ }
   } catch { head.querySelector('.count').textContent = ''; }
 }
@@ -410,7 +452,7 @@ function openUpload() {
   const go = async (files) => {
     if (!files.length) return;
     s.close();
-    sound.play('shutter');
+    sound.play('shutter'); haptic([8, 30, 8]);
     await uploader.add([...files], { event: evSel.value, side: sideSel.value, mySide: state.me.user.side });
     switchTab('mine');
   };

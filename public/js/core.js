@@ -113,6 +113,7 @@ export function sheet(content, { onClose } = {}) {
   wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
   wrap.append(panel);
   document.body.append(wrap);
+  sound.play('whoosh');
   requestAnimationFrame(() => wrap.classList.add('open'));
   return { close, panel };
 }
@@ -120,8 +121,9 @@ export function sheet(content, { onClose } = {}) {
 export function petals(n = 18) {
   if (device.lite) return;
   const box = h('div', { class: 'petals', 'aria-hidden': 'true' });
+  const kinds = ['', 'rose', 'jasmine'];
   for (let i = 0; i < n; i++) {
-    const p = h('i');
+    const p = h('i', { class: kinds[i % 3] });
     p.style.left = Math.random() * 100 + '%';
     p.style.animationDelay = Math.random() * 1.2 + 's';
     p.style.animationDuration = 2.6 + Math.random() * 2 + 's';
@@ -132,19 +134,27 @@ export function petals(n = 18) {
   setTimeout(() => box.remove(), 5200);
 }
 
-// ---------------- sounds (optional files in /audio) ----------------
+// ---------------- sounds (synthesised by scripts/make-sounds.py) ----------------
+// On by default; the Profile switch turns them off. Browsers only allow sound after the first tap.
 const sounds = {};
+const VOL = { welcome: 0.75, found: 0.8, bell: 0.6, tap: 0.35, shutter: 0.6, whoosh: 0.35 };
 export const sound = {
-  enabled() { try { return localStorage.getItem('wa_sound') === '1'; } catch { return false; } },
+  enabled() { try { return localStorage.getItem('wa_sound') !== '0'; } catch { return true; } },
   set(on) { try { localStorage.setItem('wa_sound', on ? '1' : '0'); } catch { /* ignore */ } },
+  preload() { if (device.saveData) return; for (const n of Object.keys(VOL)) { sounds[n] ||= Object.assign(new Audio(`/audio/${n}.mp3`), { preload: 'auto', volume: VOL[n] }); } },
   play(name) {
     if (!this.enabled()) return;
     try {
-      sounds[name] ||= new Audio(`/audio/${name}.mp3`);
-      sounds[name].currentTime = 0;
-      sounds[name].play().catch(() => {});
-    } catch { /* missing file */ }
+      const base = sounds[name] ||= Object.assign(new Audio(`/audio/${name}.mp3`), { volume: VOL[name] ?? 0.6 });
+      // short sounds can overlap (fast taps), long ones restart
+      const a = name === 'tap' || name === 'shutter' ? base.cloneNode() : base;
+      a.volume = VOL[name] ?? 0.6;
+      a.currentTime = 0;
+      a.play().catch(() => {});
+    } catch { /* missing file or blocked */ }
   },
 };
+
+export function haptic(pattern = 12) { try { navigator.vibrate?.(pattern); } catch { /* */ } }
 
 export function fmtCount(n) { return n > 999 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n); }

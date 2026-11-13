@@ -1,5 +1,5 @@
 // Photo grid with endless scroll, and a full-screen viewer with swipe, pinch-zoom, download and share.
-import { h, thumbUrl, viewUrl, dlUrl, toast, api } from './core.js';
+import { h, thumbUrl, viewUrl, dlUrl, toast, api, device, sound, haptic } from './core.js';
 import { fill } from './core.js';
 import { t } from './i18n.js';
 
@@ -14,7 +14,7 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
   function tile(p, i) {
     const img = h('img', { src: thumbUrl(p.id), alt: '', loading: 'lazy', decoding: 'async' });
     img.addEventListener('load', () => img.classList.add('in'), { once: true });
-    const el = h('button', { class: 'tile' + (p.status !== 'ready' ? ' pending' : ''), 'aria-label': 'Open photo', onclick: () => openViewer(i) }, img);
+    const el = h('button', { class: 'tile' + (p.status !== 'ready' ? ' pending' : ''), 'aria-label': 'Open photo', style: { '--d': `${(i % 15) * 35}ms` }, onclick: (e) => openViewer(i, e.currentTarget) }, img);
     if (p.highlight) el.append(h('span', { class: 'badge-star', 'aria-hidden': 'true' }));
     return el;
   }
@@ -44,8 +44,9 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
   io.observe(sentinel);
   load();
 
-  function openViewer(startIndex) {
+  function openViewer(startIndex, fromEl) {
     let i = startIndex;
+    sound.play('tap'); haptic(6);
     const img = h('img', { class: 'v-img', alt: '' });
     const counter = h('span', { class: 'v-count' });
     const stage = h('div', { class: 'v-stage' }, img);
@@ -59,12 +60,32 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
     const onPop = () => close(true);
     window.addEventListener('popstate', onPop);
 
+    let first = true;
     function render() {
       const p = photos[i];
       zoom = 1; tx = ty = 0; apply();
-      img.classList.remove('in');
-      img.src = viewUrl(p.id);
-      img.onload = () => img.classList.add('in');
+      // Show the (already cached) thumbnail at once, then swap in the sharper version when it arrives
+      img.classList.add('in');
+      img.src = thumbUrl(p.id);
+      const big = new Image();
+      big.onload = () => { if (photos[i] === p) img.src = big.src; };
+      big.src = viewUrl(p.id);
+      if (first && fromEl && !device.lite) {
+        first = false;
+        const r = fromEl.getBoundingClientRect();
+        requestAnimationFrame(() => {
+          const s = stage.getBoundingClientRect();
+          const size = Math.min(s.width, s.height);
+          const k = r.width / size;
+          img.animate([
+            { transform: `translate(${r.left + r.width / 2 - (s.left + s.width / 2)}px, ${r.top + r.height / 2 - (s.top + s.height / 2)}px) scale(${k})`, borderRadius: '12px' },
+            { transform: 'translate(0,0) scale(1)', borderRadius: '0px' },
+          ], { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' });
+        });
+      } else if (!first) {
+        img.animate([{ opacity: 0.4, transform: 'scale(.97)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 220, easing: 'ease-out' });
+      }
+      first = false;
       counter.textContent = `${i + 1} / ${photos.length}${next ? '+' : ''}`;
       fill(actions, 
         h('a', { class: 'pill-btn', href: dlUrl(p.id), download: '' }, t('download')),
