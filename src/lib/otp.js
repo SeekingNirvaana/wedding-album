@@ -10,8 +10,8 @@ async function mcAuthToken(env, force = false) {
   if (!force && mcToken.value && Date.now() - mcToken.at < 6 * 3600_000) return mcToken.value;
   if (!env.MC_CUSTOMER_ID || !env.MC_KEY_B64) throw new HttpError(500, 'SMS provider not configured');
   const u = new URL(MC_BASE + '/auth/v1/authentication/token');
-  u.searchParams.set('customerId', env.MC_CUSTOMER_ID);
-  u.searchParams.set('key', env.MC_KEY_B64);
+  u.searchParams.set('customerId', env.MC_CUSTOMER_ID.trim());
+  u.searchParams.set('key', env.MC_KEY_B64.trim());
   u.searchParams.set('scope', 'NEW');
   u.searchParams.set('country', '91');
   const r = await fetch(u, { headers: { accept: '*/*' } });
