@@ -3,3 +3,4 @@ node_modules/
 .dev.vars
 old/
 face-service/app/__pycache__/
+.impeccable/hook.cache.json
