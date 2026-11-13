@@ -1,0 +1,20 @@
+{
+  "name": "wedding-album",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "wrangler dev -c wrangler.dev.jsonc --local",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply wedding-album --remote",
+    "test": "python3 test/e2e.py"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.17.0",
+    "wrangler": "^4.161.0"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
+    "qrcode-generator": "^2.0.4"
+  },
+  "private": true,
+  "type": "module"
+}

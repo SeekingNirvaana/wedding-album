@@ -1,0 +1,5 @@
+node_modules/
+.wrangler/
+.dev.vars
+old/
+face-service/app/__pycache__/

@@ -1,0 +1,14 @@
+{
+  "name": "wedding-album-dev",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*", "/img/*"], "not_found_handling": "single-page-application" },
+  "vars": { "ENVIRONMENT": "development", "OTP_PROVIDER": "dev", "FACE_URL": "http://127.0.0.1:8090", "TURNSTILE_SITE_KEY": "" },
+  "d1_databases": [{ "binding": "DB", "database_name": "wedding-album", "database_id": "local-dev", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "wedding-album" }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "wedding-album-jobs" }],
+    "consumers": [{ "queue": "wedding-album-jobs", "max_batch_size": 2, "max_batch_timeout": 1, "max_retries": 3 }]
+  },
+  "triggers": { "crons": ["*/30 * * * *"] }
+}

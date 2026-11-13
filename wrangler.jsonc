@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wedding-album",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/img/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [{ "pattern": "album.anoopsanghmitra.com", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "ENVIRONMENT": "production",
+    "OTP_PROVIDER": "messagecentral",
+    "TURNSTILE_SITE_KEY": "",
+    "FIREBASE_PROJECT_ID": "",
+    "FIREBASE_API_KEY": "",
+    "FACE_INSTANCES": "3"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "wedding-album", "database_id": "PASTE_D1_DATABASE_ID_HERE", "migrations_dir": "migrations" }
+  ],
+  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "wedding-album" }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "wedding-album-jobs" }],
+    "consumers": [
+      { "queue": "wedding-album-jobs", "max_batch_size": 2, "max_batch_timeout": 2, "max_retries": 5, "max_concurrency": 3, "dead_letter_queue": "wedding-album-dlq" }
+    ]
+  },
+  "containers": [
+    { "class_name": "FaceService", "image": "./face-service/Dockerfile", "image_build_context": "./face-service", "max_instances": 3, "instance_type": "standard-2" }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "FACE", "class_name": "FaceService" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FaceService"] }],
+  "triggers": { "crons": ["*/30 * * * *"] },
+  "limits": { "cpu_ms": 60000 },
+  "observability": { "enabled": true }
+}
