@@ -129,8 +129,8 @@ export async function processPhoto(env, photoId, upgrade = false) {
     const outcomes = decideFace(settings, groups, decodeEmb(f.emb.q, f.emb.s), f.quality);
     stmts.push(...outcomeStatements(env, outcomes, row.id, photoId));
   }
-  stmts.push(env.DB.prepare("UPDATE photos SET status = 'ready', w = ?, h = ?, face_count = ?, bytes = ? WHERE id = ?")
-    .bind(out.w, out.h, out.faces.length, Math.floor(out.full.length * 0.75), photoId));
+  stmts.push(env.DB.prepare("UPDATE photos SET status = 'ready', w = ?, h = ?, face_count = ?, bytes = ?, sharp = ?, exposure = ? WHERE id = ?")
+    .bind(out.w, out.h, out.faces.length, Math.floor(out.full.length * 0.75), out.scene?.sharp ?? null, out.scene?.exposure ?? null, photoId));
   await env.DB.batch(stmts);
   await env.PHOTOS.delete(`orig/${photoId}.jpg`);
 }

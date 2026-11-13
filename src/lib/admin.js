@@ -113,6 +113,8 @@ export async function handleAdmin(request, env, session, url, ctx) {
     return json({ ok: true });
   }
 
+  if (path === '/suggestions' && method === 'GET') return json(await suggestions(env));
+
   m = path.match(/^\/photos\/([0-9a-f-]{36})$/);
   if (m && method === 'PATCH') {
     const body = await readJson(request);
@@ -123,8 +125,9 @@ export async function handleAdmin(request, env, session, url, ctx) {
     validEventSide(event, side);
     const hidden = body.hidden === undefined ? null : body.hidden ? 1 : 0;
     const highlight = body.highlight === undefined ? null : body.highlight ? 1 : 0;
-    await env.DB.prepare('UPDATE photos SET event = ?, side = ?, hidden = COALESCE(?, hidden), highlight = COALESCE(?, highlight) WHERE id = ?')
-      .bind(event, side, hidden, highlight, m[1]).run();
+    const skip = body.suggest_skip === undefined ? null : body.suggest_skip ? 1 : 0;
+    await env.DB.prepare('UPDATE photos SET event = ?, side = ?, hidden = COALESCE(?, hidden), highlight = COALESCE(?, highlight), suggest_skip = COALESCE(?, suggest_skip) WHERE id = ?')
+      .bind(event, side, hidden, highlight, skip, m[1]).run();
     await audit(env, admin, 'photo_update', m[1], body);
     return json({ ok: true });
   }
@@ -185,6 +188,7 @@ export async function deleteUser(env, userId, deleteUploads) {
   }
   await env.DB.batch([
     env.DB.prepare('DELETE FROM access WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM engage WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM candidates WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM challenges WHERE user_id = ?').bind(userId),
@@ -193,3 +197,66 @@ export async function deleteUser(env, userId, deleteUploads) {
 }
 
 export { ID_RE, now };
+
+// ---------------- Highlights suggestions ----------------
+// Ranks photos that are not yet in Highlights. Nothing is published: the couple approves each one.
+const W = { sharp: 0.24, exposure: 0.08, people: 0.2, couple: 0.26, loved: 0.22 };
+
+export async function suggestions(env, limit = 40) {
+  const [{ results: photos }, { results: couple }, { results: people }, { results: loved }, { results: hl }] = await Promise.all([
+    env.DB.prepare(`SELECT id, event, side, face_count, sharp, exposure, source, credit, sort_ts FROM photos
+                    WHERE status = 'ready' AND hidden = 0 AND highlight = 0 AND suggest_skip = 0 ORDER BY sort_ts DESC LIMIT 3000`).all(),
+    // photos where the couple (admin accounts' own faces) were recognised
+    env.DB.prepare(`SELECT a.photo_id, COUNT(DISTINCT a.user_id) AS n FROM access a
+                    JOIN face_groups g ON g.id = a.group_id AND g.kind = 'self'
+                    JOIN users u ON u.id = a.user_id AND u.role = 'admin'
+                    WHERE a.reason IN ('match', 'confirmed') GROUP BY a.photo_id`).all(),
+    // how many different guests were recognised in each photo
+    env.DB.prepare(`SELECT photo_id, COUNT(DISTINCT user_id) AS n FROM access WHERE reason IN ('match', 'confirmed') GROUP BY photo_id`).all(),
+    env.DB.prepare(`SELECT photo_id, SUM(kind = 'view') AS v, SUM(kind = 'download') AS d, SUM(kind = 'share') AS s FROM engage GROUP BY photo_id`).all(),
+    env.DB.prepare(`SELECT event, side, COUNT(*) AS n FROM photos WHERE highlight = 1 AND hidden = 0 GROUP BY event, side`).all(),
+  ]);
+  const coupleBy = new Map(couple.map((r) => [r.photo_id, r.n]));
+  const peopleBy = new Map(people.map((r) => [r.photo_id, r.n]));
+  const lovedBy = new Map(loved.map((r) => [r.photo_id, r.v + 3 * r.d + 4 * r.s]));
+  const maxLoved = Math.max(1, ...lovedBy.values());
+
+  const scored = photos.map((p) => {
+    const sharp = p.sharp ?? 0.5, exposure = p.exposure ?? 0.6;
+    const nPeople = Math.max(peopleBy.get(p.id) || 0, Math.min(p.face_count, 12) * 0.6);
+    const peopleN = Math.min(1, nPeople / 8);
+    const coupleN = Math.min(1, (coupleBy.get(p.id) || 0) / 2);
+    const lovedN = Math.log1p(lovedBy.get(p.id) || 0) / Math.log1p(maxLoved);
+    let score = W.sharp * sharp + W.exposure * exposure + W.people * peopleN + W.couple * coupleN + W.loved * lovedN;
+    if (sharp < 0.25) score *= 0.4;          // clearly blurry: keep near the bottom
+    if (p.face_count === 0) score *= 0.75;   // decor and venue shots can be lovely, but people first
+    const reasons = [];
+    if (coupleN >= 1) reasons.push('Both of you'); else if (coupleN > 0) reasons.push('One of you');
+    if (nPeople >= 5) reasons.push(`${Math.round(nPeople)} guests`);
+    if (sharp >= 0.7) reasons.push('Sharp');
+    if (lovedN >= 0.5 && (lovedBy.get(p.id) || 0) >= 3) reasons.push('Popular');
+    if (p.source === 'photographer') reasons.push('Photographer');
+    return { id: p.id, event: p.event, side: p.side, score: Math.round(score * 100), reasons, t: p.sort_ts };
+  }).sort((a, b) => b.score - a.score);
+
+  // Spread across events and sides: each pick lowers the priority of its bucket,
+  // and buckets that already have many Highlights start lower.
+  const have = new Map(hl.map((r) => [`${r.event}|${r.side}`, r.n]));
+  const picked = new Map();
+  const out = [];
+  const pool = scored.slice(0, 400);
+  while (out.length < limit && pool.length) {
+    let best = 0, bestVal = -Infinity;
+    for (let i = 0; i < pool.length; i++) {
+      const key = `${pool[i].event}|${pool[i].side}`;
+      const crowd = (picked.get(key) || 0) + (have.get(key) || 0) * 0.5;
+      const val = pool[i].score - crowd * 6;
+      if (val > bestVal) { bestVal = val; best = i; }
+    }
+    const [p] = pool.splice(best, 1);
+    const key = `${p.event}|${p.side}`;
+    picked.set(key, (picked.get(key) || 0) + 1);
+    out.push(p);
+  }
+  return { suggestions: out, highlightsByBucket: hl };
+}

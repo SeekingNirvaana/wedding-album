@@ -26,7 +26,7 @@ function unlock() {
   } }, h('h2', {}, 'Admin'), h('p', { class: 'muted' }, 'Enter the admin passcode. It stays unlocked on this phone for 12 hours.'), code, err, h('button', { class: 'btn primary wide' }, 'Unlock')));
 }
 
-const TABS = ['Overview', 'Photos', 'Guests', 'Family', 'Flags', 'Upload', 'Share', 'Log'];
+const TABS = ['Overview', 'Suggested', 'Photos', 'Guests', 'Family', 'Flags', 'Upload', 'Share', 'Log'];
 let body;
 function shell() {
   body = h('div');
@@ -39,7 +39,7 @@ function shell() {
 }
 
 function show(tab) {
-  ({ Overview, Photos, Guests, Family, Flags, Upload, Share, Log })[tab]();
+  ({ Overview, Suggested, Photos, Guests, Family, Flags, Upload, Share, Log })[tab]();
 }
 
 async function Overview() {
@@ -211,3 +211,40 @@ async function Log() {
 }
 
 boot();
+
+// Suggested Highlights: ranked by sharpness, light, who is in it (the two of you, many guests) and what guests loved.
+// Nothing goes live until you tap Add.
+async function Suggested() {
+  fill(body, h('p', { class: 'muted pad' }, 'Finding the best photos…'));
+  let data;
+  try { data = await api('/api/admin/suggestions'); } catch (e) { fill(body, h('p', { class: 'err pad' }, e.message)); return; }
+  const evName = (id) => config.events.find((e) => e.id === id)?.name || id;
+  const sideName = (s) => config.sides[s]?.label || s;
+  const buckets = h('div', { class: 'sugg-buckets' }, data.highlightsByBucket.length
+    ? data.highlightsByBucket.map((b) => h('span', { class: 'seg' }, `${evName(b.event)}${b.side !== 'joint' ? ' · ' + sideName(b.side) : ''}: ${b.n}`))
+    : h('span', { class: 'muted small' }, 'No Highlights yet.'));
+  const list = h('div', { class: 'sugg-list' });
+  const card = (p) => {
+    const el = h('div', { class: 'sugg' },
+      h('img', { src: thumbUrl(p.id), alt: '', loading: 'lazy', onclick: () => window.open(`/img/view/${p.id}.jpg`, '_blank') }),
+      h('div', { class: 'sugg-meta' },
+        h('b', {}, `${evName(p.event)}${p.side !== 'joint' ? ' · ' + sideName(p.side) : ''}`),
+        h('div', { class: 'sugg-tags' }, p.reasons.map((r) => h('span', {}, r))),
+        h('div', { class: 'sugg-btns' },
+          h('button', { class: 'btn small primary', onclick: () => decide(p, el, { highlight: true }, 'Added to Highlights') }, '★ Add'),
+          h('button', { class: 'btn small', onclick: () => decide(p, el, { suggest_skip: true }, 'Skipped') }, 'Skip'),
+          h('button', { class: 'btn small', onclick: () => decide(p, el, { hidden: true }, 'Hidden from everyone') }, 'Hide'))));
+    return el;
+  };
+  async function decide(p, el, patch, msg) {
+    try { await api(`/api/admin/photos/${p.id}`, { method: 'PATCH', body: patch }); } catch (e) { toast(e.message); return; }
+    el.classList.add('gone'); setTimeout(() => el.remove(), 300); toast(msg);
+  }
+  fill(list, data.suggestions.length ? data.suggestions.map(card) : h('p', { class: 'muted pad' }, 'No suggestions yet. They appear as photos come in.'));
+  fill(body,
+    h('div', { class: 'card' }, h('h3', {}, 'Suggested for Highlights'),
+      h('p', { class: 'muted small' }, 'Best first, spread across every event and both sides. Tap a photo to see it large. Add puts it in Highlights for everyone; Skip removes it from this list only; Hide removes it from the album.'),
+      h('p', { class: 'small', style: { marginTop: '8px' } }, 'Highlights so far:'), buckets),
+    list,
+    h('button', { class: 'btn wide', onclick: Suggested }, 'Refresh suggestions'));
+}

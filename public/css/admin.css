@@ -16,3 +16,16 @@
 .print-card{margin:18px auto;padding:22px;max-width:340px;border:2px solid var(--brass);border-radius:22px;background:var(--ivory)}
 .print-card h2{font-size:1.8rem}
 @media print{body *{visibility:hidden}.print-card,.print-card *{visibility:visible}.print-card{position:fixed;left:50%;top:20mm;transform:translateX(-50%)}}
+
+/* suggested highlights */
+.sugg-buckets{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.sugg-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;padding:0 18px 18px}
+.sugg{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;transition:opacity .3s,transform .3s}
+.sugg.gone{opacity:0;transform:scale(.92)}
+.sugg img{width:100%;aspect-ratio:1;object-fit:cover;cursor:zoom-in;display:block}
+.sugg-meta{padding:10px}
+.sugg-meta b{display:block;font-size:.85rem;margin-bottom:6px}
+.sugg-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+.sugg-tags span{font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--dawn);color:var(--sindoor)}
+.sugg-tags .score{margin-left:auto;background:none;color:var(--muted)}
+.sugg-btns{display:flex;gap:6px}.sugg-btns .btn{flex:1;padding:0 6px;min-height:36px;font-size:.8rem;white-space:nowrap}

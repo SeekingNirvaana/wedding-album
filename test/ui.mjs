@@ -30,7 +30,7 @@ if (!cookie) {
   await new Promise((r) => setTimeout(r, 2500));
   await shot('05-camera');
 } else {
-  const [k, v] = cookie.split('=');
+  const k = cookie.slice(0, cookie.indexOf('=')), v = cookie.slice(cookie.indexOf('=') + 1);
   await page.setCookie({ name: k, value: v, domain: 'localhost', path: '/', httpOnly: true });
   await page.goto(B, { waitUntil: 'networkidle0' });
   await shot('10-for-you');
@@ -43,10 +43,10 @@ if (!cookie) {
   await page.keyboard.press('Escape');
   await page.click('.nav-btn[data-tab=profile]'); await shot('16-profile');
   if (process.argv[3]) {
-    const [k2, v2] = process.argv[3].split('=');
+    const a3 = process.argv[3]; const k2 = a3.slice(0, a3.indexOf('=')), v2 = a3.slice(a3.indexOf('=') + 1);
     await page.setCookie({ name: k2, value: v2, domain: 'localhost', path: '/', httpOnly: true });
     await page.goto(B + '/admin.html', { waitUntil: 'networkidle0' }); await shot('20-admin-overview');
-    for (const [i, n] of [[1, 'photos'], [2, 'guests'], [6, 'share']]) { await page.click(`.admin-tabs .chip:nth-child(${i + 1})`); await shot('2' + i + '-admin-' + n); }
+    for (const [i, n] of [[1, 'suggested'], [2, 'photos'], [3, 'guests'], [7, 'share']]) { await page.click(`.admin-tabs .chip:nth-child(${i + 1})`); await shot('2' + i + '-admin-' + n); }
   }
 }
 console.log(errors.length ? errors.join('\n') : 'no page errors');

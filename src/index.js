@@ -4,7 +4,7 @@ import { HttpError, json, readJson, now, cleanName, ID_RE, SECURITY_HEADERS } fr
 import { getSettings } from './lib/store.js';
 import { getSession, requireSession, startOtp, verifyOtp, firebaseSignIn, logout, adminUnlock } from './lib/auth.js';
 import { createChallenge, submitChallenge, listFamily, removeFamily } from './lib/enroll.js';
-import { upload, upgrade, list, counts, remove, listCandidates, answerCandidate, serveImage } from './lib/photos.js';
+import { upload, upgrade, list, counts, remove, listCandidates, answerCandidate, serveImage, engage } from './lib/photos.js';
 import { handleAdmin, deleteUser } from './lib/admin.js';
 import { processPhoto, scanGroup } from './lib/faces.js';
 
@@ -80,6 +80,8 @@ async function api(request, env, url, ctx) {
   if (path === '/api/counts' && method === 'GET') return counts(request, env, session);
   m = path.match(/^\/api\/photos\/([0-9a-f-]{36})$/);
   if (m && method === 'DELETE') return remove(env, session, m[1]);
+  m = path.match(/^\/api\/photos\/([0-9a-f-]{36})\/engage$/);
+  if (m && method === 'POST') return engage(request, env, session, m[1]);
   m = path.match(/^\/api\/photos\/([0-9a-f-]{36})\/upgrade$/);
   if (m && method === 'PUT') return upgrade(request, env, session, m[1]);
 

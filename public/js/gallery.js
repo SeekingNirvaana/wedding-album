@@ -3,6 +3,15 @@ import { h, thumbUrl, viewUrl, dlUrl, toast, api, device, sound, haptic } from '
 import { fill } from './core.js';
 import { t } from './i18n.js';
 
+// Tells the server a guest looked at / saved / shared a photo (unique per guest; used for Highlights suggestions)
+const sent = new Set();
+function track(id, kind) {
+  const k = id + kind;
+  if (sent.has(k)) return;
+  sent.add(k);
+  fetch(`/api/photos/${id}/engage`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind }), keepalive: true }).catch(() => {});
+}
+
 export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, extraActions }) {
   const grid = h('div', { class: 'grid' });
   const sentinel = h('div', { class: 'sentinel' });
@@ -87,8 +96,9 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
       }
       first = false;
       counter.textContent = `${i + 1} / ${photos.length}${next ? '+' : ''}`;
+      if (p.status === 'ready') track(p.id, 'view');
       fill(actions, 
-        h('a', { class: 'pill-btn', href: dlUrl(p.id), download: '' }, t('download')),
+        h('a', { class: 'pill-btn', href: dlUrl(p.id), download: '', onclick: () => track(p.id, 'download') }, t('download')),
         navigator.canShare ? h('button', { class: 'pill-btn', onclick: () => share(p) }, t('share')) : null,
         ...(extraActions ? extraActions(p, refreshTile) : []),
         canDelete && canDelete(p) ? h('button', { class: 'pill-btn danger', onclick: () => remove(p) }, t('delete')) : null,
@@ -107,7 +117,7 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
       try {
         const blob = await (await fetch(`/img/full/${p.id}.jpg`)).blob();
         const file = new File([blob], `anoop-sanghmitra-${p.id.slice(0, 8)}.jpg`, { type: 'image/jpeg' });
-        if (navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
+        if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); track(p.id, 'share'); }
       } catch { /* cancelled */ }
     }
     async function remove(p) {

@@ -86,8 +86,30 @@ async def process(request: Request):
         'w': fw, 'h': fh,
         'full': _b64(full), 'view': _b64(view), 'thumb': _b64(thumb),
         'faces': faces,
+        'scene': scene_quality(bgr),
         'ms': int((time.time() - t0) * 1000),
     })
+
+
+def scene_quality(bgr):
+    """Photo-level sharpness and exposure, 0..1 each, for Highlights suggestions.
+    Sharpness uses the sharpest tiles so a blurred background (bokeh) is not penalised."""
+    h, w = bgr.shape[:2]
+    k = 1024 / max(h, w)
+    gray = cv2.cvtColor(cv2.resize(bgr, (max(1, int(w * k)), max(1, int(h * k))), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+    gh, gw = gray.shape
+    tiles = []
+    for ty in range(4):
+        for tx in range(4):
+            t = gray[ty * gh // 4:(ty + 1) * gh // 4, tx * gw // 4:(tx + 1) * gw // 4]
+            if t.size:
+                tiles.append(cv2.Laplacian(t, cv2.CV_64F).var())
+    v = float(np.percentile(tiles, 85)) if tiles else 0.0
+    sharp = float(np.clip((np.log10(v + 1) - 1.3) / 1.4, 0, 1))
+    mean = float(gray.mean()) / 255
+    clipped = float(((gray < 8) | (gray > 247)).mean())
+    exposure = float(np.clip(1 - abs(mean - 0.48) * 1.8 - clipped * 2.5, 0, 1))
+    return {'sharp': round(sharp, 3), 'exposure': round(exposure, 3)}
 
 
 @app.post('/liveness')

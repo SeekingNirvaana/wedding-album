@@ -165,6 +165,7 @@ export async function remove(env, session, photoId) {
 export async function deletePhoto(env, photoId) {
   const { results } = await env.DB.prepare('SELECT id FROM faces WHERE photo_id = ?').bind(photoId).all();
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM engage WHERE photo_id = ?').bind(photoId),
     env.DB.prepare('DELETE FROM candidates WHERE photo_id = ?').bind(photoId),
     env.DB.prepare('DELETE FROM access WHERE photo_id = ?').bind(photoId),
     env.DB.prepare('DELETE FROM faces WHERE photo_id = ?').bind(photoId),
@@ -243,3 +244,13 @@ export async function serveImage(request, env, session, url) {
 }
 
 export { validEventSide, decodeEmb };
+
+/** Records that a guest opened, downloaded or shared a photo (once per guest per kind). Feeds Highlights suggestions. */
+export async function engage(request, env, session, photoId) {
+  const body = await readJson(request, 200);
+  const kind = ['view', 'download', 'share'].includes(body.kind) ? body.kind : null;
+  if (!kind) throw new HttpError(400, 'Bad kind');
+  if (!(await canSee(env, session, photoId))) throw new HttpError(404, 'Not found');
+  await env.DB.prepare('INSERT OR IGNORE INTO engage (photo_id, user_id, kind, at) VALUES (?, ?, ?, ?)').bind(photoId, session.user.id, kind, now()).run();
+  return json({ ok: true });
+}
