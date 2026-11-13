@@ -15,8 +15,13 @@ async function mcAuthToken(env, force = false) {
   u.searchParams.set('scope', 'NEW');
   u.searchParams.set('country', '91');
   const r = await fetch(u, { headers: { accept: '*/*' } });
-  const j = await r.json().catch(() => null);
-  if (!r.ok || !j?.token) throw new HttpError(502, 'SMS provider login failed');
+  const raw = await r.text().catch(() => '');
+  let j = null; try { j = JSON.parse(raw); } catch {}
+  if (!r.ok || !j?.token) {
+    // Logged for the owner (Cloudflare → wedding-album → Observability). Never contains the key.
+    console.error('MC token failed', JSON.stringify({ http: r.status, body: raw.slice(0, 300), customerIdLooksRight: /^C-[A-Z0-9]+$/i.test(env.MC_CUSTOMER_ID.trim()), keyLength: env.MC_KEY_B64.length, keyHasSpaces: /\s/.test(env.MC_KEY_B64) }));
+    throw new HttpError(502, `SMS provider login failed (${j?.responseCode ?? j?.status ?? r.status})`);
+  }
   mcToken = { value: j.token, at: Date.now() };
   return j.token;
 }
