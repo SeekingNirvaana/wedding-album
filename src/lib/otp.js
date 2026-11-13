@@ -17,13 +17,15 @@ async function mcAuthToken(env, force = false) {
   const r = await fetch(u, { headers: { accept: '*/*' } });
   const raw = await r.text().catch(() => '');
   let j = null; try { j = JSON.parse(raw); } catch {}
-  if (!r.ok || !j?.token) {
+  // Their docs show two response shapes: { token } and { responseCode, data: { authToken } }.
+  const tok = j?.token || j?.data?.authToken || j?.authToken || null;
+  if (!r.ok || !tok) {
     // Logged for the owner (Cloudflare → wedding-album → Observability). Never contains the key.
     console.error('MC token failed', JSON.stringify({ http: r.status, body: raw.slice(0, 300), customerIdLooksRight: /^C-[A-Z0-9]+$/i.test(env.MC_CUSTOMER_ID.trim()), keyLength: env.MC_KEY_B64.length, keyHasSpaces: /\s/.test(env.MC_KEY_B64) }));
     throw new HttpError(502, `SMS provider login failed (${j?.responseCode ?? j?.status ?? r.status})`);
   }
-  mcToken = { value: j.token, at: Date.now() };
-  return j.token;
+  mcToken = { value: tok, at: Date.now() };
+  return tok;
 }
 
 async function mcCall(env, path, params, method) {
@@ -31,6 +33,7 @@ async function mcCall(env, path, params, method) {
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   let token = await mcAuthToken(env);
   let r = await fetch(u, { method, headers: { authToken: token } });
+  if (r.status === 405) { method = method === 'GET' ? 'POST' : 'GET'; r = await fetch(u, { method, headers: { authToken: token } }); }
   if (r.status === 401 && !env.MC_AUTH_TOKEN) {
     token = await mcAuthToken(env, true);
     r = await fetch(u, { method, headers: { authToken: token } });
