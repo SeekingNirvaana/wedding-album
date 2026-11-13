@@ -414,7 +414,7 @@ function renderListTab(scope, title) {
   // Family / inner circle / helpers can switch between Highlights and everything they are allowed to see
   const wide = state.me.access && state.me.access !== 'guest';
   let cur = scope;
-  const g = () => createGallery({ mount: gal, fetchPage: pager(cur), empty: () => emptyState(t('none_yet')), canDelete: () => state.me.isAdmin, extraActions: modActions });
+  const g = () => createGallery({ mount: gal, fetchPage: pager(cur), empty: () => emptyState(t('none_yet')), canDelete: (p) => p.mine || state.me.isAdmin, extraActions: modActions });
   const tabs = wide ? h('div', { class: 'scope-toggle' },
     [['highlights', t('highlights')], ['all', state.me.access === 'family' ? t('your_side_all') : t('all_photos')]].map(([k, label]) =>
       h('button', { class: 'seg' + (k === cur ? ' on' : ''), 'data-k': k, onclick: (e) => {
