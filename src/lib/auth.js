@@ -1,6 +1,6 @@
 import { HttpError, json, readJson, now, randomToken, sha256hex, hmacHex, encryptText, decryptText,
   cleanName, clientIp, requireSecret, timingSafeEqualText } from './util.js';
-import { getSettings, hit, limitOrThrow, audit, peek } from './store.js';
+import { getSettings, hit, limitOrThrow, audit, peek, flag } from './store.js';
 import { mcSend, mcVerify, verifyFirebaseIdToken, normalizeIndianMobile } from './otp.js';
 
 const COOKIE = 'wa_session';
@@ -106,10 +106,18 @@ export async function startOtp(request, env) {
   await checkTurnstile(env, body.turnstile, request.headers.get('cf-connecting-ip'));
 
   const ph = await phoneHmac(env, ten);
+  const isAdminPhone = (await adminPhoneSet(env)).has(ph);
   await limitOrThrow(env, `otp:ip:${ip}`, 25, 3600, 'Too many codes requested from this network. Try again later.');
-  await limitOrThrow(env, `otp:phd:${ph}`, 8, 86400, 'Too many codes for this number today.');
+  if (!isAdminPhone) {
+    // Sign-in limit: checked before any SMS is sent, so a looping number costs nothing
+    const settingsCap = Number((await getSettings(env)).login_daily_cap) || 5;
+    if ((await peek(env, `login:day:${ph}`, 86400)) >= settingsCap) {
+      throw new HttpError(429, 'This number has signed in too many times today. Please try again tomorrow, or ask the family to reset it.', { code: 'login_limit' });
+    }
+    await limitOrThrow(env, `otp:phd:${ph}`, 8, 86400, 'Too many codes for this number today.');
+  }
   // Escalating resend wait: 30 s, then 60 s, then 5 min
-  const last = await env.DB.prepare('SELECT created_at FROM otp_requests WHERE phone_hmac = ? ORDER BY created_at DESC LIMIT 1').bind(ph).first();
+  const last = isAdminPhone ? null : await env.DB.prepare('SELECT created_at FROM otp_requests WHERE phone_hmac = ? ORDER BY created_at DESC LIMIT 1').bind(ph).first();
   const recent = await peek(env, `otp:ph:${ph}`, 3600);
   const wait = recent >= 3 ? 300_000 : recent >= 2 ? 60_000 : 30_000;
   if (last && now() - last.created_at < wait) {
@@ -162,6 +170,11 @@ async function signInPhone(env, ten, body) {
     }
     if (user.role !== role) await env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, user.id).run();
   }
+  // Login counter (lifetime) and today's count for the limit; admins are counted but never limited
+  await env.DB.prepare('UPDATE users SET login_count = login_count + 1, last_login_at = ? WHERE id = ?').bind(now(), user.id).run();
+  const today = await hit(env, `login:day:${ph}`, 1_000_000, 86400);
+  const cap = Number((await getSettings(env)).login_daily_cap) || 5;
+  if (role !== 'admin' && today.n === cap) await flag(env, 'login_limit', user.id, { today: today.n });
   return createSession(env, user.id);
 }
 

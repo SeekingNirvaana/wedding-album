@@ -12,6 +12,7 @@ const SETTING_RULES = {
   uploads_open: (v) => ['0', '1'].includes(String(v)),
   upload_daily_cap: (v) => Number.isInteger(+v) && +v >= 10 && +v <= 5000,
   sms_daily_budget: (v) => Number.isInteger(+v) && +v >= 0 && +v <= 20000,
+  login_daily_cap: (v) => Number.isInteger(+v) && +v >= 1 && +v <= 100,
   match_confident: (v) => +v >= 0.35 && +v <= 0.7,
   match_possible: (v) => +v >= 0.25 && +v <= 0.6,
   retention_date: (v) => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v),
@@ -59,6 +60,8 @@ export async function handleAdmin(request, env, session, url, ctx) {
     if (filter === 'banned') where.push("u.status = 'banned'");
     if (filter === 'admins') where.push("u.role = 'admin'");
     if (filter === 'listed') where.push('u.listed = 1');
+    const dayWin = Math.floor(now() / 86400_000) * 86400_000;
+    if (filter === 'frequent') { where.push(`(u.login_count >= 8 OR EXISTS (SELECT 1 FROM rate r WHERE r.k = 'login:day:' || u.phone_hmac AND r.win = ${dayWin} AND r.n >= 3))`); }
     if (filter === 'not_signed_in') where.push('u.consent_at IS NULL');
     if (filter === 'no_face') where.push('u.enrolled = 0');
     if (ACCESS.includes(filter)) { where.push('u.access = ?'); args.push(filter); }
@@ -67,6 +70,8 @@ export async function handleAdmin(request, env, session, url, ctx) {
     const { results } = await env.DB.prepare(
       `SELECT u.id, u.name, u.side, u.role, u.status, u.enrolled, u.liveness_mode, u.phone_last4, u.created_at, u.last_seen,
               u.access, u.listed, u.category, u.subcategory, u.relation, u.closeness, u.consent_at IS NOT NULL AS signed_in,
+              u.login_count, u.last_login_at,
+              COALESCE((SELECT r.n FROM rate r WHERE r.k = 'login:day:' || u.phone_hmac AND r.win = ${Math.floor(now() / 86400_000) * 86400_000}), 0) AS logins_today,
               (SELECT COUNT(*) FROM photos p WHERE p.uploader_id = u.id) AS uploads,
               (SELECT COUNT(*) FROM access a WHERE a.user_id = u.id AND a.reason != 'upload') AS matched,
               (SELECT COUNT(*) FROM face_groups g WHERE g.user_id = u.id AND g.kind = 'family' AND g.status != 'revoked') AS family
@@ -104,6 +109,9 @@ export async function handleAdmin(request, env, session, url, ctx) {
       await env.DB.prepare('UPDATE users SET enroll_fails = 0, enroll_locked_until = 0 WHERE id = ?').bind(id).run();
     } else if (action === 'delete') {
       await deleteUser(env, id, true);
+    } else if (action === 'reset_login') {
+      const u = await env.DB.prepare('SELECT phone_hmac FROM users WHERE id = ?').bind(id).first();
+      if (u) await env.DB.prepare('DELETE FROM rate WHERE k IN (?, ?)').bind('login:day:' + u.phone_hmac, 'otp:phd:' + u.phone_hmac).run();
     } else if (action === 'unlist') {
       const u = await env.DB.prepare('SELECT consent_at, enrolled FROM users WHERE id = ?').bind(id).first();
       // Never signed in and nothing attached: remove entirely. Otherwise keep the account as a normal guest.

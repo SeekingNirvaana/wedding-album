@@ -7,6 +7,7 @@ const DEFAULTS = {
   uploads_open: '1',
   upload_daily_cap: '300',
   sms_daily_budget: '1500',
+  login_daily_cap: '5',
   match_confident: '0.45',
   match_possible: '0.32',
   retention_date: '',

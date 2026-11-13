@@ -70,6 +70,7 @@ async function Overview() {
     field('family_approval', 'Approve family faces manually', null, [['off', 'No, automatic'], ['on', 'Yes, I approve each']]),
     field('upload_daily_cap', 'Uploads per guest per day'),
     field('sms_daily_budget', 'SMS codes per day (budget)'),
+    field('login_daily_cap', 'Sign-ins per number per day (admins unlimited)'),
     field('match_confident', 'Match: show automatically above', 'text'),
     field('match_possible', 'Match: ask "is this you?" above', 'text'),
     field('retention_date', 'Delete all face data on (YYYY-MM-DD)', 'text'),
@@ -147,7 +148,7 @@ async function Family() {
 
 async function Flags() {
   const { flags } = await api('/api/admin/flags');
-  const label = { face_already_enrolled: 'Tried to register a face that already belongs to someone', liveness_lock: 'Locked after repeated failed face checks' };
+  const label = { face_already_enrolled: 'Tried to register a face that already belongs to someone', liveness_lock: 'Locked after repeated failed face checks', login_limit: 'Reached the daily sign-in limit (People → Reset today’s sign-in limit if genuine)' };
   fill(body, h('div', { class: 'rows' }, flags.length ? flags.map((f) => h('div', { class: 'row' },
     h('div', {}, h('b', {}, label[f.kind] || f.kind), h('small', { class: 'muted' }, ` · ${f.name || 'deleted user'} ••${f.phone_last4 || ''} · ${fmtDate(f.created_at)}`), f.detail ? h('pre', { class: 'small muted' }, f.detail) : null),
     h('button', { class: 'link-btn', onclick: async () => { await api(`/api/admin/flags/${f.id}`, { method: 'POST' }); Flags(); } }, 'Resolve'))) : h('p', { class: 'muted pad' }, 'Nothing to review.')));
@@ -313,7 +314,8 @@ async function People() {
   }
   const row = (u) => h('button', { class: 'prow', onclick: () => edit(u) },
     h('span', { class: 'pav c' + (u.closeness || 0) }, (u.name || '?')[0]),
-    h('span', { class: 'pmain' }, h('b', {}, u.name), h('small', {}, [u.relation, u.side === 'bride' ? "Bride's side" : "Groom's side", '••' + u.phone_last4].filter(Boolean).join(' · '))),
+    h('span', { class: 'pmain' }, h('b', {}, u.name), h('small', {}, [u.relation, u.side === 'bride' ? "Bride's side" : "Groom's side", '••' + u.phone_last4,
+      u.login_count ? `${u.login_count} sign-in${u.login_count === 1 ? '' : 's'}${u.logins_today ? ` (${u.logins_today} today)` : ''}` : null].filter(Boolean).join(' · '))),
     h('span', { class: 'ptags' },
       u.closeness ? h('i', { class: 'tag c' + u.closeness }, CLOSE_LABEL[u.closeness]) : null,
       u.role === 'admin' ? h('i', { class: 'tag acc' }, 'Admin') : u.access !== 'guest' ? h('i', { class: 'tag acc' }, ACCESS_LABEL[u.access]) : null,
@@ -325,12 +327,14 @@ async function People() {
     const post = (action) => api(`/api/admin/users/${u.id}`, { method: 'POST', body: { action } });
     const close = openPanel(h('h2', {}, u.name),
       h('p', { class: 'muted small' }, `••••${u.phone_last4} · ${u.uploads} uploads · ${u.matched} photos found · ${u.family} family faces${u.status === 'banned' ? ' · BANNED' : ''}`),
+      h('p', { class: 'muted small' }, `Signed in ${u.login_count || 0} time${u.login_count === 1 ? '' : 's'} in total, ${u.logins_today || 0} today${u.last_login_at ? ` · last ${fmtDate(u.last_login_at)}` : ''}`),
       form.el,
       h('button', { class: 'btn primary wide', onclick: () => act(() => api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: form.value() })) }, 'Save'),
       h('div', { class: 'admin-actions' },
         h('button', { class: 'btn', onclick: () => { close(); faceFromPhoto(u); } }, u.enrolled ? 'Add a family face from a photo' : 'Set their face from a photo'),
         u.role === 'admin' ? null : h('button', { class: 'btn', onclick: () => confirm(`Reset ${u.name}'s face?`) && act(() => post('reset_face'), 'Face reset') }, 'Reset face'),
         u.role === 'admin' ? null : h('button', { class: 'btn', onclick: () => act(() => post('unlock'), 'Unlocked') }, 'Unlock face setup'),
+        u.role === 'admin' || !u.logins_today ? null : h('button', { class: 'btn', onclick: () => act(() => post('reset_login'), 'They can sign in again today') }, 'Reset today’s sign-in limit'),
         u.role === 'admin' ? null : h('button', { class: 'btn', onclick: () => act(() => post(u.status === 'banned' ? 'unban' : 'ban')) }, u.status === 'banned' ? 'Unban' : 'Ban'),
         u.listed && u.role !== 'admin' ? h('button', { class: 'btn', onclick: () => confirm(`Remove ${u.name} from your list? If they already joined, they stay as a normal guest.`) && act(() => post('unlist'), 'Removed from list') }, 'Remove from list') : null,
         u.role === 'admin' ? null : h('button', { class: 'btn danger', onclick: () => confirm(`Delete ${u.name}, their face and their uploads?`) && act(() => post('delete'), 'Deleted') }, 'Delete account')));
@@ -394,7 +398,7 @@ async function People() {
         h('button', { class: 'btn', onclick: () => bulk() }, 'Paste a list'))),
     h('div', { class: 'card' }, q, catSel,
       h('div', { class: 'side-toggle wrap' }, seg('Everyone', ''), seg('My list', 'listed'), seg('Everything', 'inner'), seg('Their side', 'family'), seg('Helpers', 'helper'),
-        seg('Not joined', 'not_signed_in'), seg('No face', 'no_face'), seg('Banned', 'banned'))),
+        seg('Not joined', 'not_signed_in'), seg('Frequent sign-ins', 'frequent'), seg('No face', 'no_face'), seg('Banned', 'banned'))),
     list);
   load();
 }
