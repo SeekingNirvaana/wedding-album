@@ -1,0 +1,15 @@
+import puppeteer from 'puppeteer-core';
+const B = 'http://localhost:8787', c0 = process.argv[2];
+const k = c0.slice(0, c0.indexOf('=')), v = c0.slice(c0.indexOf('=') + 1);
+const browser = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox'] });
+const page = await browser.newPage();
+await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.setCookie({ name: k, value: v, domain: 'localhost', path: '/', httpOnly: true });
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+await page.goto(B, { waitUntil: 'networkidle0' }); await wait(800);
+await page.click('.nav-btn[data-tab=mine]'); await wait(1200);
+await page.click('.select-btn'); await wait(400);
+const tiles = await page.$$('.grid .tile'); await tiles[0].click(); await tiles[2].click(); await tiles[3].click(); await wait(500);
+await page.screenshot({ path: '/tmp/wow/s1-select.png' });
+console.log(errs.join('\n') || 'no page errors'); await browser.close();

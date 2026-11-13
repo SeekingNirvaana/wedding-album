@@ -4,7 +4,7 @@ import { HttpError, json, readJson, now, cleanName, ID_RE, SECURITY_HEADERS } fr
 import { getSettings } from './lib/store.js';
 import { getSession, requireSession, startOtp, verifyOtp, firebaseSignIn, logout, adminUnlock } from './lib/auth.js';
 import { createChallenge, submitChallenge, listFamily, removeFamily } from './lib/enroll.js';
-import { upload, upgrade, list, counts, remove, listCandidates, answerCandidate, serveImage, engage } from './lib/photos.js';
+import { upload, upgrade, list, counts, remove, listCandidates, answerCandidate, serveImage, engage, zipDownload, bulk } from './lib/photos.js';
 import { handleAdmin, handleMod, deleteUser, CATEGORIES } from './lib/admin.js';
 import { processPhoto, scanGroup } from './lib/faces.js';
 
@@ -78,6 +78,8 @@ async function api(request, env, url, ctx) {
 
   if (path === '/api/photos' && method === 'POST') return upload(request, env, session, ctx);
   if (path === '/api/photos' && method === 'GET') return list(request, env, session);
+  if (path === '/api/photos/zip' && method === 'GET') return zipDownload(request, env, session, url);
+  if (path === '/api/photos/bulk' && method === 'POST') return bulk(request, env, session);
   if (path === '/api/counts' && method === 'GET') return counts(request, env, session);
   m = path.match(/^\/api\/photos\/([0-9a-f-]{36})$/);
   if (m && method === 'DELETE') return remove(env, session, m[1]);

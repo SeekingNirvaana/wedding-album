@@ -2,6 +2,8 @@ import { HttpError, json, readJson, now, cleanName, ID_RE, SECURITY_HEADERS } fr
 import { getSettings, hit } from './store.js';
 import { eventById } from '../config.js';
 import { decodeEmb, addTemplates } from './faces.js';
+import { zipStream } from './zip.js';
+import { audit } from './store.js';
 
 const MAX_UPLOAD = 12 * 1024 * 1024;
 const isJpeg = (u8) => u8.length > 3 && u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff;
@@ -268,4 +270,66 @@ export async function engage(request, env, session, photoId) {
   if (!(await canSee(env, session, photoId))) throw new HttpError(404, 'Not found');
   await env.DB.prepare('INSERT OR IGNORE INTO engage (photo_id, user_id, kind, at) VALUES (?, ?, ?, ?)').bind(photoId, session.user.id, kind, now()).run();
   return json({ ok: true });
+}
+
+// ---------------- bulk: download as one zip, delete, moderate ----------------
+const MAX_ZIP = 100;
+const MAX_BULK = 200;
+
+function parseIds(list, max) {
+  const ids = [...new Set((Array.isArray(list) ? list : String(list || '').split(',')).map(String))];
+  if (!ids.length || ids.length > max || ids.some((id) => !ID_RE.test(id))) throw new HttpError(400, `Choose between 1 and ${max} photos`);
+  return ids;
+}
+
+/** GET /api/photos/zip?ids=a,b,c → one zip of the full-size photos the viewer may see. */
+export async function zipDownload(request, env, session, url) {
+  const ids = parseIds(url.searchParams.get('ids'), MAX_ZIP);
+  const seen = [];
+  for (const id of ids) {
+    const p = await canSee(env, session, id);
+    if (p && p.status === 'ready') seen.push(id);
+  }
+  if (!seen.length) throw new HttpError(404, 'Nothing to download');
+  const { results } = await env.DB.prepare(`SELECT id, event, sort_ts FROM photos WHERE id IN (${seen.map(() => '?').join(',')}) ORDER BY sort_ts`).bind(...seen).all();
+  const count = {};
+  const files = results.map((r) => {
+    count[r.event] = (count[r.event] || 0) + 1;
+    return {
+      name: `anoop-sanghmitra-${eventById(r.event)?.id || 'moments'}-${String(count[r.event]).padStart(3, '0')}.jpg`,
+      date: new Date(r.sort_ts + 5.5 * 3600_000), // zip times have no time zone; store India time
+      open: async () => (await env.PHOTOS.get(`full/${r.id}.jpg`))?.body || null,
+    };
+  });
+  const stamp = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  return new Response(zipStream(files), {
+    headers: {
+      'content-type': 'application/zip',
+      'content-disposition': `attachment; filename="anoop-sanghmitra-${files.length}-photos-${stamp}.zip"`,
+      'cache-control': 'private, no-store',
+      ...SECURITY_HEADERS,
+    },
+  });
+}
+
+/** POST /api/photos/bulk { action, ids } — delete (own photos; admins any), or highlight/unhighlight/hide (helpers and admins). */
+export async function bulk(request, env, session) {
+  const body = await readJson(request, 32 * 1024);
+  const ids = parseIds(body.ids, MAX_BULK);
+  const action = String(body.action || '');
+  const ph = ids.map(() => '?').join(',');
+  if (action === 'delete') {
+    const { results } = await env.DB.prepare(`SELECT id, uploader_id FROM photos WHERE id IN (${ph})`).bind(...ids).all();
+    const allowed = results.filter((r) => session.isAdmin || r.uploader_id === session.user.id);
+    if (allowed.length < results.length) throw new HttpError(403, 'Some of these photos are not yours to delete');
+    for (const r of allowed) await deletePhoto(env, r.id);
+    if (session.isAdmin) await audit(env, session.user.id, 'bulk_delete', null, { n: allowed.length });
+    return json({ ok: true, done: allowed.length });
+  }
+  const set = { highlight: 'highlight = 1', unhighlight: 'highlight = 0', hide: 'hidden = 1', unhide: 'hidden = 0' }[action];
+  if (!set) throw new HttpError(400, 'Unknown action');
+  if (!session.canModerate) throw new HttpError(403, 'Helpers only');
+  const r = await env.DB.prepare(`UPDATE photos SET ${set} WHERE id IN (${ph})`).bind(...ids).run();
+  await audit(env, session.user.id, 'bulk_' + action, null, { n: r.meta.changes });
+  return json({ ok: true, done: r.meta.changes });
 }

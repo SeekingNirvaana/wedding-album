@@ -366,7 +366,7 @@ async function renderYou() {
     h('span', { class: 'pulse', 'aria-hidden': 'true' }), `${me.pendingConfirmations} ${t('might_be_you')}`, h('b', {}, t('check_now'))) : null;
   const gal = h('div');
   state.scope = 'me';
-  const g = () => createGallery({ mount: gal, fetchPage: pager(state.scope), empty: () => emptyState(t('none_yet')), canDelete: (p) => p.mine || state.me.isAdmin, extraActions: modActions });
+  const g = () => createGallery({ mount: gal, fetchPage: pager(state.scope), empty: () => emptyState(t('none_yet')), canDelete: (p) => p.mine || state.me.isAdmin, extraActions: modActions, mod: state.me.canModerate });
   let gallery;
   function setScope(s) { state.scope = s; people.querySelectorAll('.person').forEach((b) => b.classList.toggle('on', b.dataset.scope === s)); gallery = g(); }
   fill(content, head, me.family.length ? people : null, confirmBar, filters(() => (gallery = g())), gal);
@@ -414,7 +414,7 @@ function renderListTab(scope, title) {
   // Family / inner circle / helpers can switch between Highlights and everything they are allowed to see
   const wide = state.me.access && state.me.access !== 'guest';
   let cur = scope;
-  const g = () => createGallery({ mount: gal, fetchPage: pager(cur), empty: () => emptyState(t('none_yet')), canDelete: (p) => p.mine || state.me.isAdmin, extraActions: modActions });
+  const g = () => createGallery({ mount: gal, fetchPage: pager(cur), empty: () => emptyState(t('none_yet')), canDelete: (p) => p.mine || state.me.isAdmin, extraActions: modActions, mod: state.me.canModerate });
   const tabs = wide ? h('div', { class: 'scope-toggle' },
     [['highlights', t('highlights')], ['all', state.me.access === 'family' ? t('your_side_all') : t('all_photos')]].map(([k, label]) =>
       h('button', { class: 'seg' + (k === cur ? ' on' : ''), 'data-k': k, onclick: (e) => {
@@ -428,7 +428,7 @@ async function renderMine() {
   const queue = h('div', { class: 'queue' });
   const gal = h('div');
   fill(content, h('div', { class: 'hello' }, h('h2', { class: 'big-title' }, t('my_uploads'))), queue, gal);
-  let gallery = createGallery({ mount: gal, fetchPage: pager('mine'), empty: () => emptyState(t('choose_photos')), canDelete: () => true });
+  let gallery = createGallery({ mount: gal, fetchPage: pager('mine'), empty: () => emptyState(t('choose_photos')), canDelete: () => true, mod: state.me.canModerate });
   let lastDone = 0;
   const off = uploader.onChange((items, live) => {
     if (state.tab !== 'mine') { off(); return; }

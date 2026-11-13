@@ -2,6 +2,9 @@
 const S = {
   en: {
     album: 'The Wedding Album',
+    select: 'Select', cancel: 'Cancel', selected: 'selected', tap_to_select: 'Tap photos to select', select_all: 'Select all',
+    zip_coming: 'Your download is starting…', zips_coming: 'Your downloads are starting ({n} files)…', preparing: 'Getting photos ready…',
+    delete_many_q: 'Delete {n} photos permanently?', hide_many_q: 'Hide {n} photos from everyone?', done_n: 'Done ({n})',
     star: 'Highlight', unstar: 'In Highlights', added_highlight: 'Added to Highlights', removed_highlight: 'Removed from Highlights',
     hide: 'Hide', hide_q: 'Hide this photo from everyone?', hidden_done: 'Hidden from everyone',
     all_photos: 'All photos', your_side_all: 'All from your side',
@@ -117,6 +120,9 @@ const S = {
   },
   hi: {
     album: 'शादी का एल्बम',
+    select: 'चुनें', cancel: 'रद्द करें', selected: 'चुनी गईं', tap_to_select: 'चुनने के लिए तस्वीरें टैप करें', select_all: 'सभी चुनें',
+    zip_coming: 'डाउनलोड शुरू हो रहा है…', zips_coming: 'डाउनलोड शुरू हो रहे हैं ({n} फ़ाइलें)…', preparing: 'तस्वीरें तैयार हो रही हैं…',
+    delete_many_q: '{n} तस्वीरें हमेशा के लिए हटाएँ?', hide_many_q: '{n} तस्वीरें सबसे छिपाएँ?', done_n: 'हो गया ({n})',
     star: 'हाइलाइट करें', unstar: 'हाइलाइट में है', added_highlight: 'हाइलाइट में जोड़ा', removed_highlight: 'हाइलाइट से हटाया',
     hide: 'छिपाएँ', hide_q: 'यह तस्वीर सबसे छिपाएँ?', hidden_done: 'सबसे छिपा दी गई',
     all_photos: 'सभी तस्वीरें', your_side_all: 'आपकी तरफ़ की सभी',
