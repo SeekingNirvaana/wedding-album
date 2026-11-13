@@ -11,7 +11,7 @@ import { processPhoto, scanGroup } from './lib/faces.js';
 /** Face service container. Internet access is off: it can only be reached through this Worker. */
 export class FaceService extends Container {
   defaultPort = 8080;
-  sleepAfter = '20m';
+  sleepAfter = '5m';
   enableInternet = false;
 }
 
