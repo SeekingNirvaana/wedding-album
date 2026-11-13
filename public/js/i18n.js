@@ -2,6 +2,7 @@
 const S = {
   en: {
     album: 'The Wedding Album',
+    select_hint: 'Tip: press and hold a photo to pick many, then download or delete them together.',
     select: 'Select', cancel: 'Cancel', selected: 'selected', tap_to_select: 'Tap photos to select', select_all: 'Select all',
     zip_coming: 'Your download is starting…', zips_coming: 'Your downloads are starting ({n} files)…', preparing: 'Getting photos ready…',
     delete_many_q: 'Delete {n} photos permanently?', hide_many_q: 'Hide {n} photos from everyone?', done_n: 'Done ({n})',
@@ -120,6 +121,7 @@ const S = {
   },
   hi: {
     album: 'शादी का एल्बम',
+    select_hint: 'सुझाव: किसी तस्वीर को दबाकर रखें, कई चुनें, फिर एक साथ डाउनलोड या डिलीट करें।',
     select: 'चुनें', cancel: 'रद्द करें', selected: 'चुनी गईं', tap_to_select: 'चुनने के लिए तस्वीरें टैप करें', select_all: 'सभी चुनें',
     zip_coming: 'डाउनलोड शुरू हो रहा है…', zips_coming: 'डाउनलोड शुरू हो रहे हैं ({n} फ़ाइलें)…', preparing: 'तस्वीरें तैयार हो रही हैं…',
     delete_many_q: '{n} तस्वीरें हमेशा के लिए हटाएँ?', hide_many_q: '{n} तस्वीरें सबसे छिपाएँ?', done_n: 'हो गया ({n})',

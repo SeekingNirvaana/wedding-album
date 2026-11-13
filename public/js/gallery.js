@@ -21,19 +21,20 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
   // ---- multi-select: long-press a photo or tap "Select" ----
   const selected = new Set();
   let selecting = false;
-  const selBtn = h('button', { class: 'select-btn', hidden: true, onclick: () => (selecting ? exitSelect() : enterSelect()) }, t('select'));
+  const selBtn = h('button', { class: 'select-btn', hidden: true, onclick: () => (selecting ? exitSelect() : enterSelect()) }, h('i', { class: 'sel-ico', 'aria-hidden': 'true' }), h('span', {}, t('select')));
   const tools = h('div', { class: 'grid-tools' }, selBtn);
   const bar = h('div', { class: 'sel-bar', role: 'toolbar' });
   fill(mount, tools, grid, sentinel);
 
   function enterSelect(first) {
-    selecting = true; grid.classList.add('selecting'); selBtn.textContent = t('cancel'); haptic(15);
+    selecting = true; grid.classList.add('selecting'); selBtn.lastChild.textContent = t('cancel'); haptic(15);
+    hintDone();
     document.body.append(bar); requestAnimationFrame(() => bar.classList.add('show'));
     if (first) toggle(first);
     renderBar();
   }
   function exitSelect() {
-    selecting = false; selected.clear(); grid.classList.remove('selecting'); selBtn.textContent = t('select');
+    selecting = false; selected.clear(); grid.classList.remove('selecting'); selBtn.lastChild.textContent = t('select');
     grid.querySelectorAll('.tile.picked').forEach((el) => el.classList.remove('picked'));
     bar.classList.remove('show'); setTimeout(() => bar.remove(), 250);
   }
@@ -107,6 +108,22 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
     exitSelect();
   }
 
+  // One-time tip so people discover multi-select; disappears once they have used it (or after a few showings)
+  let hintEl = null;
+  function showHint() {
+    let n = 0; try { if (localStorage.getItem('wa_sel_hint') === 'done') return; n = Number(localStorage.getItem('wa_sel_hint') || 0); } catch { return; }
+    if (hintEl || n >= 3) return;
+    try { localStorage.setItem('wa_sel_hint', String(n + 1)); } catch { /* */ }
+    hintEl = h('button', { class: 'sel-hint', onclick: () => { hintDone(); enterSelect(); } },
+      h('i', { class: 'hand', 'aria-hidden': 'true' }), h('span', {}, t('select_hint')), h('b', { 'aria-hidden': 'true' }, '✕'));
+    hintEl.querySelector('b').addEventListener('click', (e) => { e.stopPropagation(); hintDone(); });
+    tools.prepend(hintEl);
+  }
+  function hintDone() {
+    try { localStorage.setItem('wa_sel_hint', 'done'); } catch { /* */ }
+    if (hintEl) { hintEl.classList.add('gone'); const el = hintEl; setTimeout(() => el.remove(), 300); hintEl = null; }
+  }
+
   function tile(p, i) {
     const img = h('img', { src: thumbUrl(p.id), alt: '', loading: 'lazy', decoding: 'async' });
     img.addEventListener('load', () => img.classList.add('in'), { once: true });
@@ -140,6 +157,7 @@ export function createGallery({ mount, fetchPage, empty, canDelete, onDeleted, e
       next = res.next;
       if (!next) done = true;
       selBtn.hidden = !photos.length;
+      if (photos.length >= 2) showHint();
       if (!photos.length && empty) fill(mount, empty());
     } catch (e) {
       if (!photos.length) fill(mount, h('p', { class: 'muted center pad' }, e.message));

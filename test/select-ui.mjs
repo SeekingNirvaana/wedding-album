@@ -9,7 +9,7 @@ await page.setCookie({ name: k, value: v, domain: 'localhost', path: '/', httpOn
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 await page.goto(B, { waitUntil: 'networkidle0' }); await wait(800);
 await page.click('.nav-btn[data-tab=mine]'); await wait(1200);
-await page.click('.select-btn'); await wait(400);
+await page.screenshot({ path: '/tmp/wow/s0-hint.png' }); await page.click('.select-btn'); await wait(400);
 const tiles = await page.$$('.grid .tile'); await tiles[0].click(); await tiles[2].click(); await tiles[3].click(); await wait(500);
 await page.screenshot({ path: '/tmp/wow/s1-select.png' });
 console.log(errs.join('\n') || 'no page errors'); await browser.close();
