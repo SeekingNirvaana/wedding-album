@@ -12,7 +12,10 @@ async function boot() {
   uploader.setConfig(config);
   let me;
   try { me = await api('/api/me'); } catch { location.href = '/'; return; }
-  if (me.user.role !== 'admin') { fill(root, h('p', { class: 'pad center' }, 'Admins only.')); return; }
+  if (me.user.role !== 'admin') {
+    if (me.canModerate) return helperShell();
+    fill(root, h('p', { class: 'pad center' }, 'Admins only.')); return;
+  }
   if (!me.isAdmin) return unlock();
   shell();
 }
@@ -26,7 +29,8 @@ function unlock() {
   } }, h('h2', {}, 'Admin'), h('p', { class: 'muted' }, 'Enter the admin passcode. It stays unlocked on this phone for 12 hours.'), code, err, h('button', { class: 'btn primary wide' }, 'Unlock')));
 }
 
-const TABS = ['Overview', 'Suggested', 'Photos', 'Guests', 'Family', 'Flags', 'Upload', 'Share', 'Log'];
+const TABS = ['Overview', 'People', 'Suggested', 'Photos', 'Family', 'Flags', 'Upload', 'Share', 'Log'];
+let MOD = '/api/admin'; // helpers use /api/mod for the few things they may do
 let body;
 function shell() {
   body = h('div');
@@ -39,7 +43,7 @@ function shell() {
 }
 
 function show(tab) {
-  ({ Overview, Suggested, Photos, Guests, Family, Flags, Upload, Share, Log })[tab]();
+  ({ Overview, People, Suggested, Photos, Family, Flags, Upload, Share, Log })[tab]();
 }
 
 async function Overview() {
@@ -132,29 +136,6 @@ async function Photos() {
   load(true);
 }
 
-async function Guests() {
-  const q = h('input', { class: 'field', placeholder: 'Search name or last 4 digits' });
-  const list = h('div', { class: 'rows' });
-  let filter = '';
-  async function load() {
-    const p = new URLSearchParams({ q: q.value }); if (filter) p.set('filter', filter);
-    const { users } = await api('/api/admin/users?' + p);
-    fill(list, users.map((u) => h('div', { class: 'row' },
-      h('div', {}, h('b', {}, u.name), ` · ••${u.phone_last4}`, h('small', { class: 'muted' },
-        ` ${u.side} · ${u.enrolled ? 'face set' + (u.liveness_mode === 'stills' ? ' (photos)' : '') : 'no face'} · ${u.uploads} uploads · ${u.matched} matched · ${u.family} family${u.status === 'banned' ? ' · BANNED' : ''}${u.role === 'admin' ? ' · admin' : ''}`)),
-      u.role === 'admin' ? null : h('div', { class: 'row-actions' },
-        h('button', { class: 'link-btn', onclick: () => act(u, u.status === 'banned' ? 'unban' : 'ban') }, u.status === 'banned' ? 'Unban' : 'Ban'),
-        h('button', { class: 'link-btn', onclick: () => act(u, 'unlock') }, 'Unlock'),
-        h('button', { class: 'link-btn', onclick: () => confirm(`Reset ${u.name}'s face? They will set it up again.`) && act(u, 'reset_face') }, 'Reset face'),
-        h('button', { class: 'link-btn danger', onclick: () => confirm(`Delete ${u.name} and their uploads?`) && act(u, 'delete') }, 'Delete')))));
-  }
-  async function act(u, action) { try { await api(`/api/admin/users/${u.id}`, { method: 'POST', body: { action } }); toast('Done'); load(); } catch (e) { toast(e.message); } }
-  q.addEventListener('input', () => { clearTimeout(q.t); q.t = setTimeout(load, 300); });
-  const seg = (label, f) => h('button', { class: 'seg' + (f === filter ? ' on' : ''), onclick: (e) => { filter = f; e.currentTarget.parentElement.querySelectorAll('.seg').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); load(); } }, label);
-  fill(body, h('div', { class: 'card' }, q, h('div', { class: 'side-toggle' }, seg('All', ''), seg('Not set up', 'pending'), seg('Banned', 'banned'), seg('Admins', 'admins'))), list);
-  load();
-}
-
 async function Family() {
   const { family } = await api('/api/admin/family');
   const act = async (g, action) => { try { await api(`/api/admin/family/${g.id}`, { method: 'POST', body: { action } }); toast('Done'); Family(); } catch (e) { toast(e.message); } };
@@ -217,7 +198,7 @@ boot();
 async function Suggested() {
   fill(body, h('p', { class: 'muted pad' }, 'Finding the best photos…'));
   let data;
-  try { data = await api('/api/admin/suggestions'); } catch (e) { fill(body, h('p', { class: 'err pad' }, e.message)); return; }
+  try { data = await api(MOD + '/suggestions'); } catch (e) { fill(body, h('p', { class: 'err pad' }, e.message)); return; }
   const evName = (id) => config.events.find((e) => e.id === id)?.name || id;
   const sideName = (s) => config.sides[s]?.label || s;
   const buckets = h('div', { class: 'sugg-buckets' }, data.highlightsByBucket.length
@@ -237,7 +218,7 @@ async function Suggested() {
     return el;
   };
   async function decide(p, el, patch, msg) {
-    try { await api(`/api/admin/photos/${p.id}`, { method: 'PATCH', body: patch }); } catch (e) { toast(e.message); return; }
+    try { await api(`${MOD}/photos/${p.id}`, { method: 'PATCH', body: patch }); } catch (e) { toast(e.message); return; }
     el.classList.add('gone'); setTimeout(() => el.remove(), 300); toast(msg);
   }
   fill(list, data.suggestions.length ? data.suggestions.map(card) : h('p', { class: 'muted pad' }, 'No suggestions yet. They appear as photos come in.'));
@@ -247,4 +228,208 @@ async function Suggested() {
       h('p', { class: 'small', style: { marginTop: '8px' } }, 'Highlights so far:'), buckets),
     list,
     h('button', { class: 'btn wide', onclick: Suggested }, 'Refresh suggestions'));
+}
+
+// Helpers: only the Suggested list (plus star/hide inside the album itself)
+function helperShell() {
+  MOD = '/api/mod';
+  body = h('div');
+  fill(root, h('header', { class: 'top' }, h('div', {}, h('p', { class: 'dev-line small' }, '॥ शुभ विवाह ॥'), h('p', { class: 'top-names' }, 'Help pick Highlights')),
+    h('a', { class: 'link-btn', href: '/' }, 'Album')), body);
+  Suggested();
+}
+
+// ---------------- People: family & friends, categories, closeness, access ----------------
+const ACCESS_LABEL = { guest: 'Standard', family: 'Their side', inner: 'Everything', helper: 'Helper' };
+const ACCESS_HELP = {
+  guest: 'Their own uploads, photos they are in, and Highlights.',
+  family: 'Also every photo from their side’s Mehendi and Haldi, plus Shaadi and Vidai.',
+  inner: 'Every photo in the album.',
+  helper: 'Every photo, and can add Highlights or hide photos. Cannot change settings or see numbers.',
+};
+const CLOSE_LABEL = { 1: 'Very close', 2: 'Close', 3: 'Known' };
+const CATS = ['Family', 'Friends', 'Colleagues', 'Neighbours', 'Other'];
+/** Suggested access from closeness (you can always change it) */
+const suggestAccess = (closeness, category) => (closeness === 1 ? (category === 'Family' ? 'inner' : 'family') : closeness === 2 ? 'family' : 'guest');
+
+function selectEl(options, value, attrs = {}) {
+  return h('select', { class: 'field', ...attrs }, options.map(([v, label]) => h('option', { value: v, selected: String(v) === String(value ?? '') }, label)));
+}
+
+function personForm(p = {}, subs = []) {
+  const f = {
+    name: h('input', { class: 'field', placeholder: 'Name', value: p.name || '', maxlength: 40 }),
+    phone: p.id ? null : h('input', { class: 'field', type: 'tel', inputmode: 'numeric', placeholder: 'Mobile number', maxlength: 14 }),
+    side: selectEl([['groom', "Groom's side"], ['bride', "Bride's side"]], p.side || 'groom'),
+    category: selectEl([['', 'Category…'], ...CATS.map((c) => [c, c])], p.category),
+    subcategory: h('input', { class: 'field', placeholder: 'Sub-group, e.g. Maternal side, College', value: p.subcategory || '', list: 'subcats', maxlength: 40 }),
+    relation: h('input', { class: 'field', placeholder: 'Relation, e.g. Mausi, Roommate', value: p.relation || '', maxlength: 40 }),
+    closeness: selectEl([['', 'Closeness…'], [1, 'Very close'], [2, 'Close'], [3, 'Known']], p.closeness),
+    access: selectEl(Object.entries(ACCESS_LABEL), p.access || 'guest'),
+  };
+  const help = h('p', { class: 'muted small' }, ACCESS_HELP[f.access.value]);
+  f.access.onchange = () => { help.textContent = ACCESS_HELP[f.access.value]; f.access.dataset.touched = '1'; };
+  const auto = () => { if (!f.access.dataset.touched && f.closeness.value) { f.access.value = suggestAccess(Number(f.closeness.value), f.category.value); help.textContent = ACCESS_HELP[f.access.value]; } };
+  f.closeness.onchange = auto; f.category.onchange = auto;
+  const el = h('div', { class: 'person-form' },
+    h('datalist', { id: 'subcats' }, subs.map((x) => h('option', { value: x }))),
+    f.name, f.phone,
+    h('div', { class: 'two' }, f.side, f.closeness),
+    h('div', { class: 'two' }, f.category, f.subcategory),
+    f.relation,
+    h('label', { class: 'small muted' }, 'Can see', f.access), help);
+  const value = () => ({ name: f.name.value, phone: f.phone?.value, side: f.side.value, category: f.category.value || null,
+    subcategory: f.subcategory.value, relation: f.relation.value, closeness: f.closeness.value ? Number(f.closeness.value) : null, access: f.access.value });
+  return { el, value };
+}
+
+function openPanel(...kids) {
+  const wrap = h('div', { class: 'sheet-wrap open' });
+  const close = () => wrap.remove();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  wrap.append(h('div', { class: 'sheet', style: { transform: 'none', opacity: 1 } }, ...kids));
+  document.body.append(wrap);
+  return close;
+}
+
+async function People() {
+  const q = h('input', { class: 'field', placeholder: 'Search name or last 4 digits' });
+  const list = h('div', { class: 'people-list' });
+  let filter = '', cat = '', subs = [];
+  async function load() {
+    const p = new URLSearchParams({ q: q.value }); if (filter) p.set('filter', filter); if (cat) p.set('category', cat);
+    const r = await api('/api/admin/users?' + p);
+    subs = r.subcategories;
+    // group: category → sub-group
+    const groups = new Map();
+    for (const u of r.users) {
+      const key = u.listed ? `${u.category || 'Not grouped'}${u.subcategory ? ' · ' + u.subcategory : ''}` : 'Joined by link';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(u);
+    }
+    fill(list, groups.size ? [...groups].map(([key, us]) => h('section', { class: 'pgroup' },
+      h('h4', {}, key, h('small', {}, ` ${us.length}`)),
+      us.map(row))) : h('p', { class: 'muted pad' }, 'Nobody here yet.'));
+  }
+  const row = (u) => h('button', { class: 'prow', onclick: () => edit(u) },
+    h('span', { class: 'pav c' + (u.closeness || 0) }, (u.name || '?')[0]),
+    h('span', { class: 'pmain' }, h('b', {}, u.name), h('small', {}, [u.relation, u.side === 'bride' ? "Bride's side" : "Groom's side", '••' + u.phone_last4].filter(Boolean).join(' · '))),
+    h('span', { class: 'ptags' },
+      u.closeness ? h('i', { class: 'tag c' + u.closeness }, CLOSE_LABEL[u.closeness]) : null,
+      u.role === 'admin' ? h('i', { class: 'tag acc' }, 'Admin') : u.access !== 'guest' ? h('i', { class: 'tag acc' }, ACCESS_LABEL[u.access]) : null,
+      h('i', { class: 'tag ' + (u.signed_in ? 'ok' : 'wait') }, u.signed_in ? (u.enrolled ? 'Face ✓' : 'No face yet') : (u.enrolled ? 'Face ✓ · not joined' : 'Not joined'))));
+
+  function edit(u) {
+    const form = personForm(u, subs);
+    const act = async (fn, msg) => { try { await fn(); toast(msg || 'Saved'); close(); load(); } catch (e) { toast(e.message); } };
+    const post = (action) => api(`/api/admin/users/${u.id}`, { method: 'POST', body: { action } });
+    const close = openPanel(h('h2', {}, u.name),
+      h('p', { class: 'muted small' }, `••••${u.phone_last4} · ${u.uploads} uploads · ${u.matched} photos found · ${u.family} family faces${u.status === 'banned' ? ' · BANNED' : ''}`),
+      form.el,
+      h('button', { class: 'btn primary wide', onclick: () => act(() => api(`/api/admin/users/${u.id}`, { method: 'PATCH', body: form.value() })) }, 'Save'),
+      h('div', { class: 'admin-actions' },
+        h('button', { class: 'btn', onclick: () => { close(); faceFromPhoto(u); } }, u.enrolled ? 'Add a family face from a photo' : 'Set their face from a photo'),
+        u.role === 'admin' ? null : h('button', { class: 'btn', onclick: () => confirm(`Reset ${u.name}'s face?`) && act(() => post('reset_face'), 'Face reset') }, 'Reset face'),
+        u.role === 'admin' ? null : h('button', { class: 'btn', onclick: () => act(() => post('unlock'), 'Unlocked') }, 'Unlock face setup'),
+        u.role === 'admin' ? null : h('button', { class: 'btn', onclick: () => act(() => post(u.status === 'banned' ? 'unban' : 'ban')) }, u.status === 'banned' ? 'Unban' : 'Ban'),
+        u.listed && u.role !== 'admin' ? h('button', { class: 'btn', onclick: () => confirm(`Remove ${u.name} from your list? If they already joined, they stay as a normal guest.`) && act(() => post('unlist'), 'Removed from list') }, 'Remove from list') : null,
+        u.role === 'admin' ? null : h('button', { class: 'btn danger', onclick: () => confirm(`Delete ${u.name}, their face and their uploads?`) && act(() => post('delete'), 'Deleted') }, 'Delete account')));
+  }
+
+  function addOne() {
+    const form = personForm({}, subs);
+    const err = h('p', { class: 'err' });
+    const close = openPanel(h('h2', {}, 'Add a person'), form.el, err,
+      h('button', { class: 'btn primary wide', onclick: async () => {
+        const v = form.value();
+        try {
+          const r = await api('/api/admin/people', { method: 'POST', body: { people: [v] } });
+          if (r.invalid.length) { err.textContent = 'Check the mobile number'; return; }
+          toast(r.added.length ? `Added ${v.name}` : `Updated ${v.name}`); close(); load();
+        } catch (e) { err.textContent = e.message; }
+      } }, 'Add'));
+  }
+
+  async function fromContacts() {
+    try {
+      const picked = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+      const rows = picked.map((c) => ({ name: (c.name || [])[0] || '', phone: (c.tel || [])[0] || '' })).filter((r) => r.phone);
+      if (rows.length) bulk(rows);
+    } catch { /* cancelled */ }
+  }
+
+  function bulk(prefill = []) {
+    const shared = personForm({}, subs);
+    shared.el.querySelector('input[placeholder="Name"]').remove();
+    shared.el.querySelector('input[type=tel]')?.remove();
+    const ta = h('textarea', { class: 'field', rows: 8, placeholder: 'One person per line:\nName, mobile\nName, mobile, relation' },
+      prefill.map((r) => `${r.name}, ${r.phone}`).join('\n'));
+    const err = h('p', { class: 'err' });
+    const close = openPanel(h('h2', {}, prefill.length ? `Add ${prefill.length} contacts` : 'Paste a list'),
+      ta, h('p', { class: 'muted small' }, 'These settings apply to everyone in the list. You can change anyone later.'), shared.el, err,
+      h('button', { class: 'btn primary wide', onclick: async () => {
+        const common = shared.value();
+        const people = ta.value.split('\n').map((l) => l.split(/[,\t;]/).map((x) => x.trim())).filter((p) => p.length >= 2 && p[1])
+          .map(([name, phone, relation]) => ({ ...common, name, phone, relation: relation || common.relation }));
+        if (!people.length) { err.textContent = 'Add at least one line: Name, mobile'; return; }
+        try {
+          const r = await api('/api/admin/people', { method: 'POST', body: { people } });
+          toast(`Added ${r.added.length}, updated ${r.updated.length}`);
+          if (r.invalid.length) { err.textContent = `Could not read these numbers: ${r.invalid.join(', ')}`; load(); return; }
+          close(); load();
+        } catch (e) { err.textContent = e.message; }
+      } }, 'Add everyone'));
+  }
+
+  q.addEventListener('input', () => { clearTimeout(q.t); q.t = setTimeout(load, 300); });
+  const seg = (label, f) => h('button', { class: 'seg' + (f === filter ? ' on' : ''), onclick: (e) => { filter = f; e.currentTarget.parentElement.querySelectorAll('.seg').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); load(); } }, label);
+  const catSel = selectEl([['', 'All categories'], ...CATS.map((c) => [c, c])], '', { onchange: (e) => { cat = e.target.value; load(); } });
+  fill(body,
+    h('div', { class: 'card' },
+      h('h3', {}, 'Family & friends'),
+      h('p', { class: 'muted small' }, 'Add people before the wedding. When they sign in with that number, they get what you set here. Numbers are stored scrambled; only the last 4 digits are kept.'),
+      h('div', { class: 'admin-actions' },
+        h('button', { class: 'btn primary', onclick: addOne }, '+ Add a person'),
+        'contacts' in navigator && 'select' in navigator.contacts ? h('button', { class: 'btn', onclick: fromContacts }, 'Pick from contacts') : null,
+        h('button', { class: 'btn', onclick: () => bulk() }, 'Paste a list'))),
+    h('div', { class: 'card' }, q, catSel,
+      h('div', { class: 'side-toggle wrap' }, seg('Everyone', ''), seg('My list', 'listed'), seg('Everything', 'inner'), seg('Their side', 'family'), seg('Helpers', 'helper'),
+        seg('Not joined', 'not_signed_in'), seg('No face', 'no_face'), seg('Banned', 'banned'))),
+    list);
+  load();
+}
+
+// Face from a photo: pick the person in a group photo, attach as their own face or as a family face
+async function faceFromPhoto(u) {
+  const input = h('input', { type: 'file', accept: 'image/jpeg', class: 'visually-hidden' });
+  const label = h('input', { class: 'field', placeholder: 'Name of this family member, e.g. Dadi', maxlength: 40 });
+  const asSel = selectEl(u.enrolled ? [['family', `A family member, shown in ${u.name}'s album`]] : [['self', `${u.name} themself`], ['family', `A family member, shown in ${u.name}'s album`]], u.enrolled ? 'family' : 'self');
+  const faces = h('div', { class: 'face-picks' });
+  const err = h('p', { class: 'err' });
+  const syncLabel = () => { label.hidden = asSel.value === 'self'; };
+  asSel.onchange = syncLabel; syncLabel();
+  let preview = null, chosen = null;
+  input.onchange = async () => {
+    const file = input.files[0]; if (!file) return;
+    err.textContent = ''; fill(faces, h('p', { class: 'muted small' }, 'Finding faces…'));
+    try {
+      const res = await fetch('/api/admin/faces/preview', { method: 'POST', body: file, headers: { 'content-type': 'image/jpeg' }, credentials: 'same-origin' });
+      const d = await res.json(); if (!res.ok) throw new Error(d.error || 'Failed');
+      preview = d.previewId; chosen = d.faces.length === 1 ? 0 : null;
+      fill(faces, d.faces.map((f) => h('button', { class: 'face-pick' + (f.i === chosen ? ' on' : ''), onclick: (e) => { chosen = f.i; faces.querySelectorAll('.face-pick').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); } },
+        h('img', { src: 'data:image/jpeg;base64,' + f.crop, alt: '' }), f.quality < 0.25 ? h('small', {}, 'too blurry') : null)));
+    } catch (e) { fill(faces); err.textContent = e.message; }
+  };
+  const close = openPanel(h('h2', {}, 'Face from a photo'),
+    h('p', { class: 'muted small' }, 'For people without a smartphone, or to set someone up before the wedding. Use a clear, recent photo where the face is large and facing the camera.'),
+    h('label', { class: 'small muted' }, 'This face is', asSel), label,
+    h('button', { class: 'btn wide', onclick: () => input.click() }, 'Choose photo'), input, faces, err,
+    h('button', { class: 'btn primary wide', onclick: async () => {
+      if (!preview) { err.textContent = 'Choose a photo first'; return; }
+      if (chosen === null) { err.textContent = 'Tap the right face'; return; }
+      try {
+        await api('/api/admin/faces', { method: 'POST', body: { previewId: preview, index: chosen, userId: u.id, as: asSel.value, label: label.value } });
+        toast('Face added. Their photos will appear within a few minutes.'); close(); show('People');
+      } catch (e) { err.textContent = e.message; }
+    } }, 'Save face'));
 }

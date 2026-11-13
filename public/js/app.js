@@ -366,7 +366,7 @@ async function renderYou() {
     h('span', { class: 'pulse', 'aria-hidden': 'true' }), `${me.pendingConfirmations} ${t('might_be_you')}`, h('b', {}, t('check_now'))) : null;
   const gal = h('div');
   state.scope = 'me';
-  const g = () => createGallery({ mount: gal, fetchPage: pager(state.scope), empty: () => emptyState(t('none_yet')), canDelete: (p) => p.mine || state.me.isAdmin });
+  const g = () => createGallery({ mount: gal, fetchPage: pager(state.scope), empty: () => emptyState(t('none_yet')), canDelete: (p) => p.mine || state.me.isAdmin, extraActions: modActions });
   let gallery;
   function setScope(s) { state.scope = s; people.querySelectorAll('.person').forEach((b) => b.classList.toggle('on', b.dataset.scope === s)); gallery = g(); }
   fill(content, head, me.family.length ? people : null, confirmBar, filters(() => (gallery = g())), gal);
@@ -392,6 +392,18 @@ function countUp(el, n) {
   requestAnimationFrame(step);
 }
 
+// Helpers and admins can star or hide straight from the photo viewer
+function modActions(p, refresh) {
+  if (!state.me.canModerate) return [];
+  const patch = async (body, msg) => {
+    try { await api(`/api/mod/photos/${p.id}`, { method: 'PATCH', body }); Object.assign(p, body); toast(msg); sound.play('tap'); refresh(); } catch (e) { toast(e.message); }
+  };
+  return [
+    h('button', { class: 'pill-btn', onclick: () => patch({ highlight: !p.highlight }, p.highlight ? t('removed_highlight') : t('added_highlight')) }, p.highlight ? '★ ' + t('unstar') : '☆ ' + t('star')),
+    h('button', { class: 'pill-btn danger', onclick: () => confirm(t('hide_q')) && patch({ hidden: true }, t('hidden_done')) }, t('hide')),
+  ];
+}
+
 function emptyState(text) {
   return h('div', { class: 'empty' }, h('div', { class: 'empty-art', 'aria-hidden': 'true' }), h('p', {}, text));
 }
@@ -399,8 +411,16 @@ function emptyState(text) {
 function renderListTab(scope, title) {
   const gal = h('div');
   let gallery;
-  const g = () => createGallery({ mount: gal, fetchPage: pager(scope), empty: () => emptyState(t('none_yet')), canDelete: (p) => state.me.isAdmin });
-  fill(content, h('div', { class: 'hello' }, h('h2', { class: 'big-title' }, title)), filters(() => (gallery = g())), gal);
+  // Family / inner circle / helpers can switch between Highlights and everything they are allowed to see
+  const wide = state.me.access && state.me.access !== 'guest';
+  let cur = scope;
+  const g = () => createGallery({ mount: gal, fetchPage: pager(cur), empty: () => emptyState(t('none_yet')), canDelete: () => state.me.isAdmin, extraActions: modActions });
+  const tabs = wide ? h('div', { class: 'scope-toggle' },
+    [['highlights', t('highlights')], ['all', state.me.access === 'family' ? t('your_side_all') : t('all_photos')]].map(([k, label]) =>
+      h('button', { class: 'seg' + (k === cur ? ' on' : ''), 'data-k': k, onclick: (e) => {
+        cur = k; e.currentTarget.parentElement.querySelectorAll('.seg').forEach((b) => b.classList.toggle('on', b.dataset.k === k)); sound.play('tap'); gallery = g();
+      } }, label))) : null;
+  fill(content, h('div', { class: 'hello' }, h('h2', { class: 'big-title' }, title), tabs), filters(() => (gallery = g())), gal);
   gallery = g();
 }
 
@@ -508,7 +528,9 @@ function renderProfile() {
       h('div', { class: 'row-between' }, h('span', {}, t('wifi_only')), h('input', { type: 'checkbox', class: 'switch', checked: uploader.prefs.wifiOnly, onchange: (e) => { uploader.prefs.wifiOnly = e.target.checked; } })),
       installPrompt ? h('button', { class: 'btn wide', onclick: () => installPrompt.prompt() }, t('install')) : null),
     h('div', { class: 'card' }, h('h3', {}, t('privacy')), h('p', { class: 'muted small' }, t('privacy_text'))),
-    me.user.role === 'admin' ? h('a', { class: 'btn wide', href: '/admin.html' }, t('admin')) : null,
+    me.access && me.access !== 'guest' ? h('div', { class: 'card access-card' }, h('p', { class: 'eyebrow' }, t('your_access')), h('p', {}, t('access_' + me.access))) : null,
+    me.user.role === 'admin' ? h('a', { class: 'btn wide', href: '/admin.html' }, t('admin'))
+      : me.canModerate ? h('a', { class: 'btn wide', href: '/admin.html' }, t('help_pick')) : null,
     h('button', { class: 'btn wide', onclick: async () => { await api('/api/auth/logout', { method: 'POST' }); await clearCaches(); location.reload(); } }, t('sign_out')),
     me.user.role !== 'admin' ? h('button', { class: 'link-btn danger', onclick: deleteAccount }, t('delete_account')) : null,
   );

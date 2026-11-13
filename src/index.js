@@ -5,7 +5,7 @@ import { getSettings } from './lib/store.js';
 import { getSession, requireSession, startOtp, verifyOtp, firebaseSignIn, logout, adminUnlock } from './lib/auth.js';
 import { createChallenge, submitChallenge, listFamily, removeFamily } from './lib/enroll.js';
 import { upload, upgrade, list, counts, remove, listCandidates, answerCandidate, serveImage, engage } from './lib/photos.js';
-import { handleAdmin, deleteUser } from './lib/admin.js';
+import { handleAdmin, handleMod, deleteUser, CATEGORIES } from './lib/admin.js';
 import { processPhoto, scanGroup } from './lib/faces.js';
 
 /** Face service container. Internet access is off: it can only be reached through this Worker. */
@@ -49,6 +49,7 @@ async function api(request, env, url, ctx) {
     ]);
     return json({
       user: { name: u.name, side: u.side, enrolled: u.enrolled, phoneLast4: u.phoneLast4, role: u.role },
+      access: session.access, canModerate: session.canModerate, categories: CATEGORIES,
       isAdmin: session.isAdmin, adminNeedsCode: session.adminNeedsCode,
       family, familyMax: Number(settings.family_max), pendingConfirmations: pending.n,
       uploadsOpen: settings.uploads_open === '1',
@@ -89,6 +90,10 @@ async function api(request, env, url, ctx) {
   m = path.match(/^\/api\/candidates\/(\d{1,12})$/);
   if (m && method === 'POST') return answerCandidate(request, env, session, Number(m[1]));
 
+  if (path.startsWith('/api/mod/')) {
+    if (!session.canModerate) throw new HttpError(403, 'Helpers only');
+    return handleMod(request, env, session, url);
+  }
   if (path.startsWith('/api/admin/')) {
     if (!session.isAdmin) throw new HttpError(403, 'Admins only');
     return handleAdmin(request, env, session, url, ctx);
@@ -100,8 +105,8 @@ async function scheduled(env) {
   const t = now();
   await env.DB.batch([
     // Accounts that never finished face setup do not hold a place for long
-    env.DB.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE enrolled = 0 AND role = 'guest' AND created_at < ?)").bind(t - 86400_000),
-    env.DB.prepare("DELETE FROM users WHERE enrolled = 0 AND role = 'guest' AND created_at < ? AND id NOT IN (SELECT uploader_id FROM photos)").bind(t - 86400_000),
+    env.DB.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE enrolled = 0 AND role = 'guest' AND listed = 0 AND created_at < ?)").bind(t - 86400_000),
+    env.DB.prepare("DELETE FROM users WHERE enrolled = 0 AND role = 'guest' AND listed = 0 AND created_at < ? AND id NOT IN (SELECT uploader_id FROM photos)").bind(t - 86400_000),
     env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(t),
     env.DB.prepare('DELETE FROM otp_requests WHERE created_at < ?').bind(t - 86400_000),
     env.DB.prepare('DELETE FROM challenges WHERE created_at < ?').bind(t - 3600_000),
@@ -110,6 +115,10 @@ async function scheduled(env) {
   // Re-queue photos stuck in processing (e.g. after a failed deploy)
   const { results } = await env.DB.prepare("SELECT id FROM photos WHERE status = 'processing' AND created_at < ? LIMIT 200").bind(t - 30 * 60_000).all();
   for (const p of results) await env.JOBS.send({ type: 'process', photoId: p.id });
+  // Face previews from the admin "face from a photo" tool are only needed for a few minutes
+  const tmp = await env.PHOTOS.list({ prefix: 'tmp/preview/', limit: 500 });
+  const old = tmp.objects.filter((o) => t - new Date(o.uploaded).getTime() > 3600_000).map((o) => o.key);
+  if (old.length) await env.PHOTOS.delete(old);
   // Retention: after the chosen date, delete all face data (photos and access stay)
   const settings = await getSettings(env, true);
   if (settings.retention_date && t > Date.parse(settings.retention_date + 'T00:00:00+05:30')) {

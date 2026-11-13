@@ -1,0 +1,17 @@
+import puppeteer from 'puppeteer-core';
+const B = 'http://localhost:8787', c0 = process.argv[2];
+const k = c0.slice(0, c0.indexOf('=')), v = c0.slice(c0.indexOf('=') + 1);
+const browser = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox'] });
+const page = await browser.newPage();
+await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.setCookie({ name: k, value: v, domain: 'localhost', path: '/', httpOnly: true });
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+await page.goto(B + '/admin.html', { waitUntil: 'networkidle0' });
+await page.click('.admin-tabs .chip:nth-child(2)'); await wait(900);
+await page.screenshot({ path: '/tmp/wow/p1-people.png', fullPage: true });
+await page.click('.prow'); await wait(500); await page.screenshot({ path: '/tmp/wow/p2-edit.png' });
+await page.mouse.click(195, 30); await wait(300);
+await page.evaluate(() => [...document.querySelectorAll('.btn')].find((b) => b.textContent.includes('Paste a list')).click()); await wait(400);
+await page.screenshot({ path: '/tmp/wow/p3-paste.png' });
+console.log(errs.join('\n') || 'no page errors'); await browser.close();

@@ -46,7 +46,7 @@ if (!cookie) {
     const a3 = process.argv[3]; const k2 = a3.slice(0, a3.indexOf('=')), v2 = a3.slice(a3.indexOf('=') + 1);
     await page.setCookie({ name: k2, value: v2, domain: 'localhost', path: '/', httpOnly: true });
     await page.goto(B + '/admin.html', { waitUntil: 'networkidle0' }); await shot('20-admin-overview');
-    for (const [i, n] of [[1, 'suggested'], [2, 'photos'], [3, 'guests'], [7, 'share']]) { await page.click(`.admin-tabs .chip:nth-child(${i + 1})`); await shot('2' + i + '-admin-' + n); }
+    for (const [i, n] of [[1, 'people'], [2, 'suggested'], [3, 'photos'], [7, 'share']]) { await page.click(`.admin-tabs .chip:nth-child(${i + 1})`); await shot('2' + i + '-admin-' + n); }
   }
 }
 console.log(errors.length ? errors.join('\n') : 'no page errors');

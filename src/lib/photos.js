@@ -13,17 +13,32 @@ function validEventSide(event, side) {
 }
 
 // ---------------- visibility (the single source of truth) ----------------
-/** SQL fragment: photos the user may see. Params: userId twice. */
-const VISIBLE = `(p.uploader_id = ?1 OR (p.highlight = 1 AND p.status = 'ready') OR EXISTS (SELECT 1 FROM access a WHERE a.user_id = ?1 AND a.photo_id = p.id))`;
+// Everyone: their uploads, photos they are recognised in, and Highlights.
+// Access levels set by the couple widen that:
+//   family → also every photo from their own side's events, plus joint events (Shaadi, Vidai)
+//   inner / helper (and admins) → every photo
+const BASE = `(p.uploader_id = ?1 OR (p.highlight = 1 AND p.status = 'ready') OR EXISTS (SELECT 1 FROM access a WHERE a.user_id = ?1 AND a.photo_id = p.id))`;
+const SIDES = new Set(['groom', 'bride']);
+
+/** SQL fragment for photos this session may see. Uses ?1 = viewer id. Only fixed, validated values are inlined. */
+export function visibleSql(session) {
+  if (session.access === 'inner' || session.access === 'helper') return `(p.uploader_id = ?1 OR p.status = 'ready')`;
+  if (session.access === 'family' && SIDES.has(session.user.side)) {
+    return `(${BASE} OR (p.status = 'ready' AND p.side IN ('joint', '${session.user.side}')))`;
+  }
+  return BASE;
+}
 
 export async function canSee(env, session, photoId) {
-  const p = await env.DB.prepare('SELECT id, uploader_id, status, hidden, highlight FROM photos WHERE id = ?').bind(photoId).first();
+  const p = await env.DB.prepare('SELECT id, uploader_id, status, hidden, highlight, side FROM photos WHERE id = ?').bind(photoId).first();
   if (!p) return null;
   if (session.isAdmin) return p;
   if (p.hidden) return null;
   if (p.uploader_id === session.user.id) return p;
   if (p.status !== 'ready') return null;
   if (p.highlight) return p;
+  if (session.access === 'inner' || session.access === 'helper') return p;
+  if (session.access === 'family' && (p.side === 'joint' || p.side === session.user.side)) return p;
   const a = await env.DB.prepare('SELECT 1 FROM access WHERE user_id = ? AND photo_id = ?').bind(session.user.id, photoId).first();
   return a ? p : null;
 }
@@ -110,7 +125,7 @@ export async function list(request, env, session) {
   } else if (scope === 'admin' && session.isAdmin) {
     // everything, for moderation
   } else {
-    where.push(VISIBLE);
+    where.push(visibleSql(session));
   }
   if (!session.isAdmin) where.push('p.hidden = 0');
   if (scope !== 'mine' && scope !== 'admin') where.push("p.status = 'ready'");
@@ -149,7 +164,7 @@ export async function counts(request, env, session) {
             WHERE a.user_id = ?1 AND a.group_id IN (SELECT id FROM face_groups WHERE user_id = ?1 AND kind = 'self')
               AND p.hidden = 0 AND p.status = 'ready' GROUP BY p.event, p.side`;
   else if (scope === 'highlights') sql = "SELECT event, side, COUNT(*) AS n FROM photos p WHERE p.highlight = 1 AND p.hidden = 0 AND p.status = 'ready' AND ?1 IS NOT NULL GROUP BY event, side";
-  else sql = `SELECT event, side, COUNT(*) AS n FROM photos p WHERE ${VISIBLE} AND p.hidden = 0 AND p.status = 'ready' GROUP BY event, side`;
+  else sql = `SELECT event, side, COUNT(*) AS n FROM photos p WHERE ${visibleSql(session)} AND p.hidden = 0 AND p.status = 'ready' GROUP BY event, side`;
   const { results } = await env.DB.prepare(sql).bind(session.user.id).all();
   return json({ counts: results });
 }

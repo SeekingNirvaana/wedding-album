@@ -8,6 +8,7 @@ const SESSION_DAYS = 45;
 const ADMIN_ELEVATION_MS = 12 * 3600_000;
 
 const isDev = (env) => env.ENVIRONMENT === 'development';
+export const ACCESS = ['guest', 'family', 'inner', 'helper'];
 
 function cookieHeader(token, maxAge) {
   return `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
@@ -34,11 +35,16 @@ export async function getSession(request, env) {
   if (!row.last_seen || now() - row.last_seen > 3600_000) {
     await env.DB.prepare('UPDATE users SET last_seen = ? WHERE id = ?').bind(now(), row.id).run();
   }
+  const isAdmin = row.role === 'admin' && row.elevated_until > now();
+  // What this person may see: admins always see everything; others get the level set in the People list
+  const access = row.role === 'admin' ? 'inner' : ACCESS.includes(row.access) ? row.access : 'guest';
   return {
     tokenHash: th,
     user: { id: row.id, name: row.name, side: row.side, role: row.role, enrolled: !!row.enrolled, phoneLast4: row.phone_last4,
       livenessMode: row.liveness_mode, enrollLockedUntil: row.enroll_locked_until },
-    isAdmin: row.role === 'admin' && row.elevated_until > now(),
+    access,
+    isAdmin,
+    canModerate: isAdmin || row.access === 'helper',
     adminNeedsCode: row.role === 'admin' && row.elevated_until <= now(),
   };
 }
@@ -85,7 +91,7 @@ async function checkCapacity(env, isNew) {
   const cap = Number(s.signup_cap) || 1000;
   const [{ active }, { pending }] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) AS active FROM users WHERE enrolled = 1 AND status = 'active'").first(),
-    env.DB.prepare('SELECT COUNT(*) AS pending FROM users WHERE enrolled = 0 AND created_at > ?').bind(now() - 86400_000).first(),
+    env.DB.prepare('SELECT COUNT(*) AS pending FROM users WHERE enrolled = 0 AND listed = 0 AND created_at > ?').bind(now() - 86400_000).first(),
   ]);
   if (active >= cap) throw new HttpError(403, 'The album is full right now. Please ask the family to make room.', { code: 'full' });
   if (pending >= Math.max(100, Math.floor(cap * 0.25))) throw new HttpError(429, 'Lots of people are joining right now. Please try again in an hour.', { code: 'busy' });
@@ -147,8 +153,14 @@ async function signInPhone(env, ten, body) {
       'INSERT INTO users (id, phone_hmac, phone_last4, name, side, role, consent_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).bind(id, ph, ten.slice(-4), cleanName(body.name) || 'Guest', side, role, now(), now()).run();
     user = { id };
-  } else if (user.role !== role) {
-    await env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, user.id).run();
+  } else {
+    // Pre-listed by the couple and signing in for the first time: record consent, keep the listed name and side
+    if (!user.consent_at) {
+      if (body.consent !== true) throw new HttpError(400, 'Please accept the privacy notice to continue', { code: 'consent' });
+      const name = user.name || cleanName(body.name) || 'Guest';
+      await env.DB.prepare('UPDATE users SET consent_at = ?, name = ? WHERE id = ?').bind(now(), name, user.id).run();
+    }
+    if (user.role !== role) await env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind(role, user.id).run();
   }
   return createSession(env, user.id);
 }
@@ -161,10 +173,10 @@ export async function verifyOtp(request, env) {
   if (!row || row.status !== 'sent' || now() - row.created_at > 5 * 60_000) throw new HttpError(400, 'This code has expired. Please ask for a new one.', { code: 'expired' });
   if (row.attempts >= 5) throw new HttpError(429, 'Too many wrong tries. Please ask for a new code.', { code: 'expired' });
   // Check sign-up preconditions before using up the code
-  const known = await env.DB.prepare('SELECT 1 FROM users WHERE phone_hmac = ?').bind(row.phone_hmac).first();
-  if (!known) {
+  const known = await env.DB.prepare('SELECT consent_at FROM users WHERE phone_hmac = ?').bind(row.phone_hmac).first();
+  if (!known || !known.consent_at) {
     if (body.consent !== true) throw new HttpError(400, 'Please accept the privacy notice to continue', { code: 'consent' });
-    await checkCapacity(env, true);
+    if (!known) await checkCapacity(env, true);
   }
   await env.DB.prepare('UPDATE otp_requests SET attempts = attempts + 1 WHERE id = ?').bind(row.id).run();
 

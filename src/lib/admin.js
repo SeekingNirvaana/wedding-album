@@ -1,6 +1,9 @@
-import { HttpError, json, readJson, now, ID_RE } from './util.js';
+import { HttpError, json, readJson, now, ID_RE, cleanName } from './util.js';
 import { getSettings, setSettings, audit, bumpTemplatesVersion, peek } from './store.js';
 import { validEventSide, deletePhoto } from './photos.js';
+import { phoneHmac, ACCESS } from './auth.js';
+import { normalizeIndianMobile } from './otp.js';
+import { callFace, activeGroups, decodeEmb, groupScore, addTemplates } from './faces.js';
 
 const SETTING_RULES = {
   signup_cap: (v) => Number.isInteger(+v) && +v >= 10 && +v <= 1000,
@@ -55,16 +58,38 @@ export async function handleAdmin(request, env, session, url, ctx) {
     if (filter === 'pending') where.push('u.enrolled = 0');
     if (filter === 'banned') where.push("u.status = 'banned'");
     if (filter === 'admins') where.push("u.role = 'admin'");
+    if (filter === 'listed') where.push('u.listed = 1');
+    if (filter === 'not_signed_in') where.push('u.consent_at IS NULL');
+    if (filter === 'no_face') where.push('u.enrolled = 0');
+    if (ACCESS.includes(filter)) { where.push('u.access = ?'); args.push(filter); }
+    const cat = url.searchParams.get('category');
+    if (cat) { where.push('u.category = ?'); args.push(cat.slice(0, 30)); }
     const { results } = await env.DB.prepare(
       `SELECT u.id, u.name, u.side, u.role, u.status, u.enrolled, u.liveness_mode, u.phone_last4, u.created_at, u.last_seen,
+              u.access, u.listed, u.category, u.subcategory, u.relation, u.closeness, u.consent_at IS NOT NULL AS signed_in,
               (SELECT COUNT(*) FROM photos p WHERE p.uploader_id = u.id) AS uploads,
               (SELECT COUNT(*) FROM access a WHERE a.user_id = u.id AND a.reason != 'upload') AS matched,
               (SELECT COUNT(*) FROM face_groups g WHERE g.user_id = u.id AND g.kind = 'family' AND g.status != 'revoked') AS family
-         FROM users u ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY u.created_at DESC LIMIT 300`).bind(...args).all();
-    return json({ users: results });
+         FROM users u ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY u.listed DESC, u.closeness IS NULL, u.closeness, u.category, u.subcategory, u.name LIMIT 1000`).bind(...args).all();
+    const subs = await env.DB.prepare('SELECT DISTINCT subcategory AS s FROM users WHERE subcategory IS NOT NULL ORDER BY s').all();
+    return json({ users: results, subcategories: subs.results.map((r) => r.s) });
   }
 
+  if (path === '/people' && method === 'POST') return addPeople(request, env, admin);
+  if (path === '/faces/preview' && method === 'POST') return facePreview(request, env);
+  if (path === '/faces' && method === 'POST') return faceFromPhoto(request, env, admin);
+
   let m = path.match(/^\/users\/([0-9a-f-]{36})$/);
+  if (m && method === 'PATCH') {
+    const body = await readJson(request);
+    const u = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(m[1]).first();
+    if (!u) throw new HttpError(404, 'Not found');
+    const f = personFields(body, u);
+    await env.DB.prepare('UPDATE users SET name = ?, side = ?, access = ?, category = ?, subcategory = ?, relation = ?, closeness = ?, listed = 1 WHERE id = ?')
+      .bind(f.name, f.side, f.access, f.category, f.subcategory, f.relation, f.closeness, u.id).run();
+    await audit(env, admin, 'person_update', u.id, { access: f.access, closeness: f.closeness, category: f.category });
+    return json({ ok: true });
+  }
   if (m && method === 'POST') {
     const id = m[1];
     if (id === admin) throw new HttpError(400, 'You cannot change your own account here');
@@ -79,6 +104,11 @@ export async function handleAdmin(request, env, session, url, ctx) {
       await env.DB.prepare('UPDATE users SET enroll_fails = 0, enroll_locked_until = 0 WHERE id = ?').bind(id).run();
     } else if (action === 'delete') {
       await deleteUser(env, id, true);
+    } else if (action === 'unlist') {
+      const u = await env.DB.prepare('SELECT consent_at, enrolled FROM users WHERE id = ?').bind(id).first();
+      // Never signed in and nothing attached: remove entirely. Otherwise keep the account as a normal guest.
+      if (u && !u.consent_at && !u.enrolled) await deleteUser(env, id, true);
+      else await env.DB.prepare("UPDATE users SET listed = 0, access = 'guest' WHERE id = ?").bind(id).run();
     } else throw new HttpError(400, 'Unknown action');
     await audit(env, admin, `user_${action}`, id);
     return json({ ok: true });
@@ -259,4 +289,118 @@ export async function suggestions(env, limit = 40) {
     out.push(p);
   }
   return { suggestions: out, highlightsByBucket: hl };
+}
+
+// ---------------- People list ----------------
+export const CATEGORIES = ['Family', 'Friends', 'Colleagues', 'Neighbours', 'Other'];
+
+function personFields(b, cur = {}) {
+  const pick = (v, ok, dflt) => (v === undefined ? dflt : ok(v) ? v : (() => { throw new HttpError(400, 'Invalid value'); })());
+  const text = (v, d) => (v === undefined ? d : cleanName(String(v || '')).slice(0, 40) || null);
+  const closeness = b.closeness === undefined ? cur.closeness ?? null : b.closeness === null || b.closeness === '' ? null : Number(b.closeness);
+  if (closeness !== null && ![1, 2, 3].includes(closeness)) throw new HttpError(400, 'Closeness must be 1, 2 or 3');
+  return {
+    name: text(b.name, cur.name) || cur.name || 'Guest',
+    side: pick(b.side, (v) => ['groom', 'bride'].includes(v), cur.side || 'groom'),
+    access: pick(b.access, (v) => ACCESS.includes(v), cur.access || 'guest'),
+    category: pick(b.category, (v) => v === null || v === '' || CATEGORIES.includes(v), cur.category ?? null) || null,
+    subcategory: text(b.subcategory, cur.subcategory ?? null),
+    relation: text(b.relation, cur.relation ?? null),
+    closeness,
+  };
+}
+
+/** Add one or many people. Existing accounts (same number) are updated instead of duplicated. */
+async function addPeople(request, env, admin) {
+  const body = await readJson(request, 256 * 1024);
+  const rows = Array.isArray(body.people) ? body.people.slice(0, 500) : [];
+  if (!rows.length) throw new HttpError(400, 'Nobody to add');
+  const added = [], updated = [], invalid = [];
+  const admins = new Set(String(env.ADMIN_PHONES || '').split(',').map((p) => normalizeIndianMobile(p)).filter(Boolean));
+  for (const r of rows) {
+    const ten = normalizeIndianMobile(r.phone);
+    if (!ten) { invalid.push(r.name || r.phone || '?'); continue; }
+    const ph = await phoneHmac(env, ten);
+    const cur = await env.DB.prepare('SELECT * FROM users WHERE phone_hmac = ?').bind(ph).first();
+    const f = personFields(r, cur || {});
+    if (cur) {
+      await env.DB.prepare('UPDATE users SET name = ?, side = ?, access = ?, category = ?, subcategory = ?, relation = ?, closeness = ?, listed = 1 WHERE id = ?')
+        .bind(cur.consent_at ? cur.name : f.name, f.side, f.access, f.category, f.subcategory, f.relation, f.closeness, cur.id).run();
+      updated.push(f.name);
+    } else {
+      await env.DB.prepare(`INSERT INTO users (id, phone_hmac, phone_last4, name, side, role, access, listed, category, subcategory, relation, closeness, added_by, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`)
+        .bind(crypto.randomUUID(), ph, ten.slice(-4), f.name, f.side, admins.has(ten) ? 'admin' : 'guest', f.access, f.category, f.subcategory, f.relation, f.closeness, admin, now()).run();
+      added.push(f.name);
+    }
+  }
+  await audit(env, admin, 'people_add', null, { added: added.length, updated: updated.length, invalid: invalid.length });
+  return json({ added, updated, invalid });
+}
+
+// ---------------- Faces from a photo (admins only; for people without smartphones, or to set someone up in advance) ----------------
+async function facePreview(request, env) {
+  const len = Number(request.headers.get('content-length') || 0);
+  if (!len || len > 12 * 1024 * 1024) throw new HttpError(413, 'Photo too large');
+  const buf = await request.arrayBuffer();
+  const res = await callFace(env, '/process', { method: 'POST', body: buf, headers: { 'content-type': 'image/jpeg' } });
+  if (!res.ok) throw new HttpError(res.status === 415 ? 415 : 502, res.status === 415 ? 'Please choose a JPEG photo' : 'Face check is busy, please try again');
+  const out = await res.json();
+  const faces = out.faces.filter((f) => f.crop).slice(0, 30);
+  if (!faces.length) throw new HttpError(400, 'No faces found in this photo. Try a clearer, closer photo.');
+  const previewId = crypto.randomUUID();
+  await env.PHOTOS.put(`tmp/preview/${previewId}.json`, JSON.stringify({ at: now(), faces: faces.map((f) => ({ emb: f.emb, quality: f.quality })) }));
+  return json({ previewId, faces: faces.map((f, i) => ({ i, crop: f.crop, quality: f.quality })) });
+}
+
+async function faceFromPhoto(request, env, admin) {
+  const body = await readJson(request);
+  if (!ID_RE.test(String(body.previewId || '')) || !ID_RE.test(String(body.userId || ''))) throw new HttpError(400, 'Bad request');
+  const obj = await env.PHOTOS.get(`tmp/preview/${body.previewId}.json`);
+  if (!obj) throw new HttpError(400, 'This preview expired. Choose the photo again.');
+  const data = await obj.json();
+  if (now() - data.at > 30 * 60_000) throw new HttpError(400, 'This preview expired. Choose the photo again.');
+  const face = data.faces[Number(body.index)];
+  if (!face) throw new HttpError(400, 'Pick a face');
+  if (face.quality < 0.25) throw new HttpError(400, 'That face is too small or blurry. Use a closer, sharper photo.');
+  const owner = await env.DB.prepare('SELECT id, name, enrolled FROM users WHERE id = ?').bind(body.userId).first();
+  if (!owner) throw new HttpError(404, 'Person not found');
+  const asSelf = body.as === 'self';
+  if (asSelf && owner.enrolled) throw new HttpError(409, `${owner.name} already has a face set up. Reset it first if it is wrong.`);
+
+  // One face, one person
+  const emb = decodeEmb(face.emb.q, face.emb.s);
+  for (const g of await activeGroups(env)) {
+    if (groupScore(g, emb) >= 0.5) throw new HttpError(409, 'This face is already set up for someone in the album.');
+  }
+  const groupId = crypto.randomUUID();
+  const label = asSelf ? null : cleanName(body.label) || 'Family';
+  await env.DB.prepare("INSERT INTO face_groups (id, user_id, kind, label, status, liveness_mode, created_at) VALUES (?, ?, ?, ?, 'active', 'admin_photo', ?)")
+    .bind(groupId, owner.id, asSelf ? 'self' : 'family', label, now()).run();
+  await addTemplates(env, groupId, [face.emb]);
+  if (asSelf) await env.DB.prepare("UPDATE users SET enrolled = 1, liveness_mode = 'admin_photo' WHERE id = ?").bind(owner.id).run();
+  await env.PHOTOS.delete(`tmp/preview/${body.previewId}.json`);
+  await env.JOBS.send({ type: 'scan', groupId, cursor: 0 });
+  await audit(env, admin, 'face_from_photo', owner.id, { as: asSelf ? 'self' : 'family', label });
+  return json({ ok: true, groupId });
+}
+
+// ---------------- Helpers (moderators): suggestions and Highlight/Hide only ----------------
+export async function handleMod(request, env, session, url) {
+  const path = url.pathname.slice('/api/mod'.length);
+  if (path === '/suggestions' && request.method === 'GET') return json(await suggestions(env));
+  const m = path.match(/^\/photos\/([0-9a-f-]{36})$/);
+  if (m && request.method === 'PATCH') {
+    const b = await readJson(request);
+    const set = [], args = [];
+    if (b.highlight !== undefined) { set.push('highlight = ?'); args.push(b.highlight ? 1 : 0); }
+    if (b.hidden !== undefined) { set.push('hidden = ?'); args.push(b.hidden ? 1 : 0); }
+    if (b.suggest_skip !== undefined) { set.push('suggest_skip = ?'); args.push(b.suggest_skip ? 1 : 0); }
+    if (!set.length) throw new HttpError(400, 'Nothing to change');
+    const r = await env.DB.prepare(`UPDATE photos SET ${set.join(', ')} WHERE id = ?`).bind(...args, m[1]).run();
+    if (!r.meta.changes) throw new HttpError(404, 'Not found');
+    await audit(env, session.user.id, 'mod_photo', m[1], b);
+    return json({ ok: true });
+  }
+  throw new HttpError(404, 'Not found');
 }

@@ -29,3 +29,28 @@
 .sugg-tags span{font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--dawn);color:var(--sindoor)}
 .sugg-tags .score{margin-left:auto;background:none;color:var(--muted)}
 .sugg-btns{display:flex;gap:6px}.sugg-btns .btn{flex:1;padding:0 6px;min-height:36px;font-size:.8rem;white-space:nowrap}
+
+/* people */
+.side-toggle.wrap{flex-wrap:wrap;overflow:visible;padding:10px 0 0}
+.people-list{padding:0 18px 30px}
+.pgroup h4{font-family:var(--serif);font-size:1.25rem;font-weight:600;margin:18px 2px 8px;color:var(--ink)}
+.pgroup h4 small{font-family:var(--body);font-size:.75rem;color:var(--muted)}
+.prow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;margin-bottom:6px;border-radius:14px;background:#fff;border:1px solid var(--line)}
+.pav{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-family:var(--serif);font-size:1.2rem;background:var(--dawn);color:var(--sindoor)}
+.pav.c1{background:linear-gradient(135deg,var(--sindoor),var(--marigold));color:#fff}
+.pav.c2{background:#F6D9A8;color:var(--sindoor)}
+.pmain{flex:1;min-width:0}.pmain b{display:block}.pmain small{display:block;color:var(--muted);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptags{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.tag{font-style:normal;font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--dawn);color:var(--muted);white-space:nowrap}
+.tag.c1{background:var(--sindoor);color:#fff}.tag.c2{background:var(--marigold);color:#fff}.tag.c3{background:var(--dawn);color:var(--ink)}
+.tag.acc{background:var(--night);color:#F6E7C1}
+.tag.ok{background:#E3F1DA;color:#2F5A23}.tag.wait{background:#F7E4CF;color:#8a5a1c}
+.person-form .field{margin-top:8px}
+.person-form .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.person-form label{display:block;margin-top:10px}
+.face-picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:12px 0}
+.face-pick{position:relative;border-radius:12px;overflow:hidden;border:3px solid transparent}
+.face-pick.on{border-color:var(--marigold);box-shadow:0 0 0 3px rgba(227,139,41,.25)}
+.face-pick img{width:100%;aspect-ratio:1;object-fit:cover}
+.face-pick small{position:absolute;left:0;right:0;bottom:0;background:rgba(166,58,36,.85);color:#fff;font-size:.6rem;padding:2px}
+textarea.field{padding:12px 16px;min-height:140px;font-size:.95rem}
