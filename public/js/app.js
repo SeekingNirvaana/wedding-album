@@ -64,7 +64,10 @@ function loadScript(src) {
 
 function openSignIn() {
   const c = state.config;
-  let side = 'groom', token = '';
+  let side = 'groom', token = '', tsError = '';
+  const waiters = [];
+  const setToken = (v) => { token = v; tsError = ''; while (waiters.length) waiters.shift()(v); };
+  const waitForToken = (ms) => token ? Promise.resolve(token) : new Promise((res) => { waiters.push(res); setTimeout(() => res(token), ms); });
   const name = h('input', { class: 'field', autocomplete: 'name', maxlength: 40, placeholder: t('your_name') });
   const phone = h('input', { class: 'field', type: 'tel', inputmode: 'numeric', autocomplete: 'tel-national', maxlength: 14, placeholder: '98765 43210' });
   const sideCard = (key, art) => h('button', { type: 'button', class: 'side-card' + (side === key ? ' on' : ''), 'data-side': key, onclick: (e) => {
@@ -79,11 +82,19 @@ function openSignIn() {
     if (!consent.checked) { err.textContent = t('consent'); return; }
     send.disabled = true;
     try {
+      if (c.turnstileSiteKey && !token) {
+        if (tsError) throw new Error(t('check_failed') + ' (' + tsError + ')');
+        send.textContent = t('checking');
+        if (window.turnstile && ts.dataset.wid) { try { window.turnstile.execute(ts.dataset.wid); } catch {} }
+        token = await waitForToken(12000);
+        send.textContent = t('send_code');
+        if (!token) throw new Error(tsError ? t('check_failed') + ' (' + tsError + ')' : t('check_slow'));
+      }
       const res = await api('/api/auth/start', { method: 'POST', body: { phone: phone.value, turnstile: token } });
       if (res.provider === 'firebase') await firebaseFlow(s, phone.value, name.value, side);
       else otpStep(s, res, phone.value, name.value, side);
     } catch (e2) {
-      err.textContent = e2.message; send.disabled = false;
+      err.textContent = e2.message; send.disabled = false; send.textContent = t('send_code');
       if (window.turnstile && ts.dataset.wid) { window.turnstile.reset(ts.dataset.wid); token = ''; }
     }
   } },
@@ -100,7 +111,8 @@ function openSignIn() {
     turnstileLoaded ||= loadScript('https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit');
     turnstileLoaded.then(() => {
       ts.dataset.wid = window.turnstile.render(ts, { sitekey: c.turnstileSiteKey, size: 'flexible', appearance: 'interaction-only',
-        callback: (v) => { token = v; }, 'expired-callback': () => { token = ''; } });
+        callback: setToken, 'expired-callback': () => { token = ''; },
+        'error-callback': (code) => { tsError = String(code || 'error'); while (waiters.length) waiters.shift()(''); return true; } });
     }).catch(() => { err.textContent = t('offline'); });
   }
 }
