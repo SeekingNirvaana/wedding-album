@@ -41,7 +41,7 @@ async function mcCall(env, path, params, method) {
 
 export async function mcSend(env, mobile10) {
   const { http, body } = await mcCall(env, '/verification/v3/send', {
-    countryCode: '91', customerId: env.MC_CUSTOMER_ID || '', flowType: 'SMS', mobileNumber: mobile10, otpLength: '6',
+    countryCode: '91', customerId: (env.MC_CUSTOMER_ID || '').trim(), flowType: 'SMS', mobileNumber: mobile10, otpLength: '6',
   }, 'POST');
   const code = body?.responseCode;
   if (http === 200 && String(code) === '200' && body?.data?.verificationId) return String(body.data.verificationId);
@@ -54,7 +54,7 @@ export async function mcSend(env, mobile10) {
 /** Returns 'ok' | 'wrong' | 'expired' */
 export async function mcVerify(env, mobile10, verificationId, code) {
   const { http, body } = await mcCall(env, '/verification/v3/validateOtp', {
-    countryCode: '91', mobileNumber: mobile10, verificationId, customerId: env.MC_CUSTOMER_ID || '', code, flowType: 'SMS',
+    countryCode: '91', mobileNumber: mobile10, verificationId, customerId: (env.MC_CUSTOMER_ID || '').trim(), code, flowType: 'SMS',
   }, 'GET');
   const rc = String(body?.responseCode ?? body?.data?.responseCode ?? '');
   if (http === 200 && rc === '200' && body?.data?.verificationStatus === 'VERIFICATION_COMPLETED') return 'ok';
