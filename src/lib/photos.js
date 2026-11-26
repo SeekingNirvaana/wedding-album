@@ -59,7 +59,8 @@ export async function upload(request, env, session, ctx) {
   const u = session.user;
   const url = new URL(request.url);
   const settings = await getSettings(env);
-  if (!session.isAdmin) {
+  // Admin accounts are never limited, even when the admin passcode is not currently unlocked on this phone
+  if (!session.isAdmin && u.role !== 'admin') {
     if (settings.uploads_open !== '1') throw new HttpError(403, 'Uploads are closed');
     if (!u.enrolled) throw new HttpError(403, 'Set up your face first, then you can upload', { code: 'enroll_first' });
     const d = await hit(env, `up:${u.id}:${new Date().toISOString().slice(0, 10)}`, Number(settings.upload_daily_cap) || 300, 86400);

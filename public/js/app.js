@@ -429,24 +429,56 @@ async function renderMine() {
   const gal = h('div');
   fill(content, h('div', { class: 'hello' }, h('h2', { class: 'big-title' }, t('my_uploads'))), queue, gal);
   let gallery = createGallery({ mount: gal, fetchPage: pager('mine'), empty: () => emptyState(t('choose_photos')), canDelete: () => true, mod: state.me.canModerate });
-  let lastDone = 0;
-  const off = uploader.onChange((items, live) => {
+  let lastDone = -1, lastReload = 0, reloadTimer = null, batchStart = null;
+  // Refresh the photo grid at most every 8 seconds while a batch is sending, and once when it finishes
+  const refreshGrid = (force) => {
+    clearTimeout(reloadTimer);
+    const wait = force ? 0 : Math.max(0, 8000 - (Date.now() - lastReload));
+    reloadTimer = setTimeout(() => { lastReload = Date.now(); gallery.reload(); }, wait);
+  };
+  const render = (items, live, sum) => {
     if (state.tab !== 'mine') { off(); return; }
+    const st = uploader.status();
     const active = items.filter((i) => i.status !== 'done');
-    const done = items.filter((i) => i.status === 'done').length;
-    fill(queue, active.length ? h('div', { class: 'queue-card' },
-      h('p', { class: 'eyebrow' }, `${t('queue_title')} · ${active.length}`),
-      h('div', { class: 'queue-list' }, active.slice(0, 30).map((i) => {
-        const p = live.get(i.id)?.progress;
-        const ring = h('div', { class: 'ring' });
-        ring.style.setProperty('--p', String(Math.round((p || 0) * 100)));
-        return h('div', { class: 'q-item ' + i.status, title: i.error || '' }, ring,
-          h('small', {}, i.status === 'uploading' ? t('sending') : i.status === 'failed' ? t('failed') : i.status === 'error' ? (i.error || t('failed')) : t('queued')));
-      }))) : null);
-    if (done > lastDone) { lastDone = done; sound.play('bell'); gallery.reload(); }
+    if (lastDone < 0) lastDone = sum.done;
+    if (sum.done > lastDone) {
+      const finished = sum.pending === 0;
+      lastDone = sum.done;
+      refreshGrid(finished);
+      if (finished) { sound.play('bell'); batchStart = null; }
+    }
+    if (!active.length) { fill(queue); updateBanner(); return; }
+    if (batchStart === null) batchStart = { done: sum.batchSent, at: Date.now() };
+    const total = Math.max(sum.batchTotal, sum.batchSent + sum.pending);
+    const sent = sum.batchSent;
+    const pct = total ? Math.round((sent / total) * 100) : 0;
+    const perMin = sent - batchStart.done > 0 ? (sent - batchStart.done) / ((Date.now() - batchStart.at) / 60000) : 0;
+    const left = sum.pending && perMin > 0 ? Math.ceil(sum.pending / perMin) : null;
+    const reason = st.reason === 'offline' ? t('q_offline') : st.reason === 'wifi_only' ? t('q_wifi') : st.reason === 'daily_cap' ? t('q_cap')
+      : st.reason === 'signed_out' ? t('q_signed_out') : st.reason === 'enroll' ? t('q_enroll') : null;
+    const current = active.filter((i) => i.status === 'uploading').map((i) => live.get(i.id)?.progress || 0);
+    fill(queue, h('div', { class: 'queue-card' + (reason ? ' paused' : '') },
+      h('div', { class: 'q-head' },
+        h('p', { class: 'eyebrow' }, t('queue_title')),
+        h('b', {}, `${sent} / ${total} ${t('q_sent')}`)),
+      h('div', { class: 'q-bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100' },
+        h('i', { style: { width: `${pct}%` } }),
+        current.length ? h('u', { style: { width: `${Math.min(100 - pct, (current.reduce((a, b) => a + b, 0) / total) * 100)}%`, left: `${pct}%` } }) : null),
+      h('p', { class: 'q-line' },
+        reason || (sum.uploading ? `${t('sending')} ${sum.uploading} · ${sum.queued} ${t('q_waiting')}${left ? ` · ~${left} ${t('q_min_left')}` : ''}`
+          : sum.failed ? t('q_retrying') : sum.pending ? t('q_starting') : t('q_finished'))),
+      sum.error ? h('ul', { class: 'q-errors' }, [...new Set(active.filter((i) => i.status === 'error').map((i) => (i.error === 'lost' ? t('q_lost_one') : i.error) || t('failed')))].slice(0, 3).map((m) => h('li', {}, m))) : null,
+      sum.failed || sum.error ? h('p', { class: 'q-line warn' },
+        [sum.failed ? `${sum.failed} ${t('q_will_retry')}` : null, sum.error ? `${sum.error} ${t('q_could_not')}` : null].filter(Boolean).join(' · ')) : null,
+      sum.lost ? h('p', { class: 'q-line warn' }, t('q_lost', { n: sum.lost })) : null,
+      sum.unsaved ? h('p', { class: 'q-line' }, t('q_keep_open')) : null,
+      h('div', { class: 'q-btns' },
+        sum.failed || (sum.error && !sum.capped) ? h('button', { class: 'btn small', onclick: () => { uploader.retryNow(); toast(t('q_retrying')); } }, t('q_retry_now')) : null,
+        sum.failed || sum.error ? h('button', { class: 'btn small', onclick: () => { if (confirm(t('q_clear_q'))) uploader.clearErrors(); } }, t('q_clear_failed')) : null)));
     updateBanner();
-  });
-  uploader.items().then((items) => { lastDone = items.filter((i) => i.status === 'done').length; });
+  };
+  const off = uploader.onChange(render);
+  uploader.items().then((items) => render(items, new Map(), uploader.summary()));
   uploader.kick();
 }
 
